@@ -88,7 +88,8 @@ const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // front emergency-stop thresho
 
 // Auto-stop timeout (debug aid).
 // 0 disables it; otherwise the car stops after this many seconds.
-const unsigned long AUTO_STOP_SECONDS = 20;
+const unsigned long AUTO_STOP_SECONDS = 0;
+//const unsigned long AUTO_STOP_SECONDS = 20;
 
 // ============================================================================
 // Servo / ESC pulse widths
@@ -103,7 +104,11 @@ const uint16_t SERVO_MAX = 1715;     // max pulse (us) = full left
 const uint16_t ESC_STOP_US = 1500;   // neutral / stop (us)
 const uint16_t ESC_MIN_US = 1000;    // min ESC pulse (us)
 const uint16_t ESC_MAX_US = 2000;    // max ESC pulse (us)
-const uint16_t SPEED_US = 1680;      // cruise pulse (us)
+// Cruise pulse history:
+//   1680: C1 (2025 final course), 3 laps in 17.5s, 1st place.
+//   1600: C2 (2026 hairpin course), testing since 2026-10 (slower for the
+//         three hairpins). LOOKAHEAD_OFFSET_MM is still the 1680 value.
+const uint16_t SPEED_US = 1600;      // cruise pulse (us)
 
 // ============================================================================
 // Math constants
