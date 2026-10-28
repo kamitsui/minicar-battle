@@ -58,8 +58,10 @@ class Logger {
     }
 
     // Compact one-sensor reading.
+    // A non-zero VL53L1X range_status is appended as "/<status>"
+    // (e.g. "S3:1485/1" = SigmaFail); RangeValid (0) prints nothing extra.
     static void printSensorData(uint8_t channel, uint16_t distance,
-                                bool valid) {
+                                bool valid, uint8_t status) {
         print("S");
         print(channel);
         print(":");
@@ -68,14 +70,31 @@ class Logger {
         } else {
             print("---");
         }
+        if (status != 0) {
+            print("/");
+            print(status);
+        }
     }
 
     // Gap-detection result.
-    static void printGapResult(float targetAngle, float targetDistance) {
+    // mode: 0 = straight (S, or SL with the post-left-corner bias),
+    //       -1 = corner left (CL), +1 = corner right (CR).
+    // F: median-filtered front distance used by the gate (mm).
+    static void printGapResult(float targetAngle, float targetDistance,
+                               int8_t mode, bool leftBias,
+                               uint16_t frontFiltered) {
         print(" | T:");
         print(targetAngle, 1);
         print("° Ld:");
         print((int)targetDistance);
+        print(" M:");
+        if (mode == 0) {
+            print(leftBias ? "SL" : "S");
+        } else {
+            print(mode < 0 ? "CL" : "CR");
+        }
+        print(" F:");
+        print(frontFiltered);
     }
 
     // Steering angle, with a small visual indicator.

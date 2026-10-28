@@ -14,6 +14,12 @@
  *   target = (angle_left * area_left + angle_right * area_right) /
  *            (area_left + area_right)
  *
+ * Front gate (Config.h GAP_LOGIC): before step 1, the median-filtered front
+ * sensor selects straight or corner mode, which changes the distances used
+ * for picking the farthest sensor (steps 1-2 only; step 3 uses raw
+ * distances). LOGIC_GATE_BIAS also favors the left side for a short time
+ * after a left corner.
+ *
  * Note: Ld (the lookahead distance) is computed in SteeringController from
  * the front sensor reading, not here.
  */
@@ -22,11 +28,101 @@
 
 #include <math.h>
 
-GapFinder::GapFinder() : _lastFarthestIdx(FRONT_SENSOR_INDEX) {}
+GapFinder::GapFinder()
+    : _lastFarthestIdx(FRONT_SENSOR_INDEX),
+      _turnDir(0),
+      _frontCount(0),
+      _frontPos(0),
+      _frontFiltered(0),
+      _enterCount(0),
+      _approachBalance(0.0f),
+      _biasActive(false),
+      _biasUntilMs(0) {}
 
 // ============================================================================
 // Private
 // ============================================================================
+
+void GapFinder::_updateFrontFilter(const SensorData* data) {
+    const SensorData& front = data[FRONT_SENSOR_INDEX];
+    if (!front.valid) return;  // keep the previous median
+
+    _frontHist[_frontPos] = front.distance;
+    _frontPos = (_frontPos + 1) % FRONT_MEDIAN_WINDOW;
+    if (_frontCount < FRONT_MEDIAN_WINDOW) ++_frontCount;
+
+    // Insertion sort on a copy; the window is tiny.
+    uint16_t sorted[FRONT_MEDIAN_WINDOW];
+    for (uint8_t i = 0; i < _frontCount; ++i) {
+        uint16_t v = _frontHist[i];
+        int8_t j = i - 1;
+        while (j >= 0 && sorted[j] > v) {
+            sorted[j + 1] = sorted[j];
+            --j;
+        }
+        sorted[j + 1] = v;
+    }
+    _frontFiltered = sorted[_frontCount / 2];
+}
+
+void GapFinder::_updateMode(const SensorData* data) {
+    _updateFrontFilter(data);  // also logged under LOGIC_BASELINE
+
+    if (!FRONT_GATE_ENABLED) {
+        _turnDir = 0;
+        return;
+    }
+    if (_frontFiltered == 0) return;  // no front data yet
+
+    if (_biasActive && (long)(millis() - _biasUntilMs) >= 0) {
+        _biasActive = false;
+    }
+
+    if (_turnDir == 0) {
+        // Approach: accumulate which side is more open while the front
+        // closes in, so the decision reflects the corner ahead rather than
+        // the last frame before entry.
+        if (_frontFiltered < APPROACH_FRONT_MM) {
+            for (int i = 0; i < NUM_SENSORS; ++i) {
+                if (!data[i].valid) continue;
+                if (SENSOR_ANGLES[i] < 0.0f) _approachBalance -= data[i].distance;
+                if (SENSOR_ANGLES[i] > 0.0f) _approachBalance += data[i].distance;
+            }
+        } else {
+            _approachBalance = 0.0f;
+        }
+
+        _enterCount = (_frontFiltered < CORNER_ENTER_FRONT_MM) ? _enterCount + 1 : 0;
+        if (_enterCount >= CORNER_ENTER_DEBOUNCE) {
+            // Ties go left: the course is counter-clockwise.
+            _turnDir = (_approachBalance > 0.0f) ? 1 : -1;
+            _enterCount = 0;
+            _approachBalance = 0.0f;
+            _biasActive = false;
+        }
+    } else if (_frontFiltered > CORNER_EXIT_FRONT_MM) {
+        if (_turnDir < 0 && POST_CORNER_BIAS_ENABLED) {
+            _biasActive = true;
+            _biasUntilMs = millis() + POST_CORNER_BIAS_MS;
+        }
+        _turnDir = 0;
+    }
+}
+
+float GapFinder::_effectiveDistance(const SensorData* data, int idx) const {
+    if (!data[idx].valid) return 0.0f;
+    if (!FRONT_GATE_ENABLED) return data[idx].distance;
+
+    if (_turnDir == 0) {
+        // Straight: discount the side sensors (more on the right right
+        // after a left corner).
+        const float* weight = _biasActive ? LEFT_BIAS_WEIGHT : STRAIGHT_SIDE_WEIGHT;
+        return data[idx].distance * weight[idx];
+    }
+    // Corner: ignore sensors on the side opposite to the locked turn.
+    if (SENSOR_ANGLES[idx] * _turnDir < 0.0f) return 0.0f;
+    return data[idx].distance;
+}
 
 int GapFinder::_findFarthestSensor(const SensorData* data,
                                   float& outDistance) const {
@@ -34,8 +130,9 @@ int GapFinder::_findFarthestSensor(const SensorData* data,
     float farthest_dist = 0.0f;
 
     for (int i = 0; i < NUM_SENSORS; ++i) {
-        if (data[i].valid && data[i].distance > farthest_dist) {
-            farthest_dist = data[i].distance;
+        float d = _effectiveDistance(data, i);
+        if (d > farthest_dist) {
+            farthest_dist = d;
             farthest_idx = i;
         }
     }
@@ -47,21 +144,21 @@ int GapFinder::_findFarthestSensor(const SensorData* data,
 int GapFinder::_applyHysteresis(const SensorData* data, int candidateIdx,
                                float candidateDist, float& outDistance) {
     int result_idx = candidateIdx;
-    float result_dist = candidateDist;
 
     // Keep the previous farthest sensor if the new candidate is not enough farther.
+    // Both sides of the comparison use effective distances.
     if (_lastFarthestIdx >= 0 && _lastFarthestIdx < NUM_SENSORS &&
-        data[_lastFarthestIdx].valid && candidateIdx != _lastFarthestIdx) {
-        float diff = candidateDist - data[_lastFarthestIdx].distance;
-        if (diff < FARTHEST_HYSTERESIS) {
+        candidateIdx != _lastFarthestIdx) {
+        float last_dist = _effectiveDistance(data, _lastFarthestIdx);
+        if (last_dist > 0.0f &&
+            candidateDist - last_dist < FARTHEST_HYSTERESIS) {
             result_idx = _lastFarthestIdx;
-            result_dist = data[_lastFarthestIdx].distance;
         }
     }
 
     // Update state for the next call.
     _lastFarthestIdx = result_idx;
-    outDistance = result_dist;
+    outDistance = data[result_idx].distance;  // raw distance for step 3
     return result_idx;
 }
 
@@ -121,7 +218,13 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 // ============================================================================
 
 GapResult GapFinder::find(const SensorData* data) {
-    GapResult result = {0.0f};
+    GapResult result = {0.0f, 0, false, 0};
+
+    // Step 0: straight/corner mode from the front sensor.
+    _updateMode(data);
+    result.mode = _turnDir;
+    result.left_bias = _biasActive && _turnDir == 0;
+    result.front_filtered = _frontFiltered;
 
     // Step 1: pick the farthest sensor.
     float farthest_dist;

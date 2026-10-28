@@ -71,6 +71,68 @@ const float MAX_STEERING_ANGLE = 30.0;  // max steering angle (deg)
 const float FARTHEST_HYSTERESIS = 100.0;  // hysteresis for farthest-sensor switching (mm); tested 0-300
 
 // ============================================================================
+// Gap logic selection (EXP-001, see docs/experiments/)
+//   LOGIC_BASELINE:  original farthest-sensor GapFinder.
+//   LOGIC_GATE:      front-gated straight/corner modes (below).
+//   LOGIC_GATE_BIAS: LOGIC_GATE + left bias for a short time after a left
+//                    corner (picks the left lane at the board after hairpin 3).
+// ============================================================================
+#define LOGIC_BASELINE 0
+#define LOGIC_GATE 1
+#define LOGIC_GATE_BIAS 2
+
+#define GAP_LOGIC LOGIC_GATE_BIAS  // select gap logic here
+
+// ============================================================================
+// Front gate (LOGIC_GATE, LOGIC_GATE_BIAS)
+// The front sensor (S3), median-filtered, tells straights from corners:
+//   Straight mode (until filtered S3 < CORNER_ENTER_FRONT_MM for
+//     CORNER_ENTER_DEBOUNCE frames): side sensors are discounted by
+//     STRAIGHT_SIDE_WEIGHT so wall openings (shortcut gaps) do not beat
+//     the road ahead.
+//   Corner mode (until filtered S3 > CORNER_EXIT_FRONT_MM): the turn
+//     direction is locked on entry and sensors on the opposite side are
+//     ignored, so the car does not turn back toward the straight it came
+//     from after running wide.
+// Turn direction = sign of (right - left) distances summed over the
+// approach (filtered S3 < APPROACH_FRONT_MM). Deciding from the frame of
+// entry alone picked the wrong side at hairpin (1) in hand-push logs.
+// History (offline replay of hand-push logs, 2026-10-28):
+//   ENTER/EXIT 1500/1800, raw S3: rejected (159 switches per lap; the ~1.4 m
+//     reading S3 gives with no near wall caused false corners).
+//   ENTER 1300: rejected (false corners at start/goal remained).
+//   Side weight 0.7: rejected (side sensor still won 9 frames at the shortcut).
+// ============================================================================
+const bool FRONT_GATE_ENABLED = (GAP_LOGIC != LOGIC_BASELINE);
+const uint8_t FRONT_MEDIAN_WINDOW = 5;       // frames (~200 ms); gate input only
+const uint8_t CORNER_ENTER_DEBOUNCE = 3;     // consecutive frames below ENTER
+const float CORNER_ENTER_FRONT_MM = 1200.0;  // provisional; from replay
+const float CORNER_EXIT_FRONT_MM = 2000.0;   // provisional; must be > ENTER
+const float APPROACH_FRONT_MM = 2000.0;      // start summing the turn direction
+const float STRAIGHT_SIDE_WEIGHT[NUM_SENSORS] = {0.4, 0.6, 1.0, 1.0, 1.0, 0.6, 0.4};  // provisional
+
+// ============================================================================
+// Post-left-corner bias (LOGIC_GATE_BIAS)
+// For POST_CORNER_BIAS_MS after leaving a left corner, straight mode uses
+// LEFT_BIAS_WEIGHT instead of STRAIGHT_SIDE_WEIGHT. It only changes which
+// direction is aimed at; it does not control the distance to the left wall.
+// ============================================================================
+const bool POST_CORNER_BIAS_ENABLED = (GAP_LOGIC == LOGIC_GATE_BIAS);
+const unsigned long POST_CORNER_BIAS_MS = 1000;  // provisional
+const float LEFT_BIAS_WEIGHT[NUM_SENSORS] = {0.4, 0.6, 1.0, 1.0, 0.7, 0.3, 0.2};  // provisional
+
+// ============================================================================
+// Sensor test aids (static tests; keep defaults for runs)
+// L1X_ROI_SIZE: ROI width/height in SPADs (4-16). 16 = full ~27deg field of
+//   view; smaller narrows it (e.g. 6 for S3 so side walls in a 700 mm lane
+//   stay out of view).
+// SENSOR_ENABLE_MASK: bit i = sensor i ranges. Disabled sensors stay idle
+//   (no emission) and read as invalid. 0x08 = S3 only, 0x1C = S2-S4.
+// ============================================================================
+const uint8_t L1X_ROI_SIZE[NUM_SENSORS] = {16, 16, 16, 16, 16, 16, 16};
+const uint8_t SENSOR_ENABLE_MASK = 0x7F;
+
+// ============================================================================
 // Pure Pursuit
 // Formula: steering_angle = atan2(2 * L * sin(alpha), Ld)
 //   L:     wheelbase (mm)

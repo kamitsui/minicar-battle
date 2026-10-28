@@ -54,6 +54,16 @@ void setup() {
 #else
     Logger::println("DEBUG_RUN (PWM ON, Serial ON)");
 #endif
+    Logger::print("Gap Logic: ");
+#if GAP_LOGIC == LOGIC_BASELINE
+    Logger::println("BASELINE (farthest sensor)");
+#elif GAP_LOGIC == LOGIC_GATE
+    Logger::println("GATE (straight/corner modes)");
+#else
+    Logger::println("GATE_BIAS (modes + post-left-corner bias)");
+#endif
+    Logger::print("Sensor Enable Mask: 0x");
+    Logger::println(String(SENSOR_ENABLE_MASK, HEX));
     Logger::print("Measurement Interval: ");
     Logger::print(MEASUREMENT_INTERVAL);
     Logger::println("ms");
@@ -136,7 +146,7 @@ void loop() {
         // Debug: print sensor readings
         for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
             Logger::printSensorData(SENSOR_CHANNELS[i], sensorData[i].distance,
-                                    sensorData[i].valid);
+                                    sensorData[i].valid, sensorData[i].status);
             if (i < NUM_SENSORS - 1) {
                 Logger::print(" | ");
             }
@@ -161,7 +171,8 @@ void loop() {
         float front_distance = sensorData[FRONT_SENSOR_INDEX].valid
                                ? sensorData[FRONT_SENSOR_INDEX].distance
                                : 0.0f;
-        Logger::printGapResult(gap.target_angle, front_distance);
+        Logger::printGapResult(gap.target_angle, front_distance, gap.mode,
+                               gap.left_bias, gap.front_filtered);
 
         // =========================================================================
         // Phase 4: steering angle (Pure Pursuit)
