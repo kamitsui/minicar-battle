@@ -19,7 +19,7 @@
 #define MODE_PRODUCTION 1
 #define MODE_DEBUG_RUN 2
 
-#define RUN_MODE MODE_DEBUG // select run mode here
+#define RUN_MODE MODE_DEBUG_RUN // select run mode here
 
 // Feature toggles derived from RUN_MODE
 #define ENABLE_SERIAL (RUN_MODE == MODE_DEBUG || RUN_MODE == MODE_DEBUG_RUN)
@@ -129,7 +129,7 @@ const float LEFT_BIAS_WEIGHT[NUM_SENSORS] = {0.4, 0.6, 1.0, 1.0, 0.7, 0.3, 0.2};
 // SENSOR_ENABLE_MASK: bit i = sensor i ranges. Disabled sensors stay idle
 //   (no emission) and read as invalid. 0x08 = S3 only, 0x1C = S2-S4.
 // ============================================================================
-const uint8_t L1X_ROI_SIZE[NUM_SENSORS] = {16, 16, 16, 16, 16, 16, 16};
+const uint8_t L1X_ROI_SIZE[NUM_SENSORS] = {16, 16, 16, 6, 16, 16, 16};
 const uint8_t SENSOR_ENABLE_MASK = 0x7F;
 
 // ============================================================================
@@ -173,11 +173,15 @@ const unsigned long AUTO_STOP_SECONDS = 0;
 // ============================================================================
 // Servo / ESC pulse widths
 // ============================================================================
-// Steering servo. New servo nominal range is 1200(R)-1500(C)-1800(L);
-// values below are calibrated for the current install.
-const uint16_t SERVO_CENTER = 1415;  // center (us)
-const uint16_t SERVO_MIN = 1115;     // min pulse (us) = full right
-const uint16_t SERVO_MAX = 1715;     // max pulse (us) = full left
+// Steering servo. New servo nominal range is 1200(R)-1500(C)-1800(L).
+// History:
+//   1115(R)-1415(C)-1715(L): rejected 2026-10-29 (C2 steerpush drifted right
+//     with the steering near center).
+//   1200(R)-1500(C)-1800(L): in use since 2026-10-29 (less drift).
+// Steering maps onto MIN..MAX, so shift all three together when trimming.
+const uint16_t SERVO_CENTER = 1500;  // center (us)
+const uint16_t SERVO_MIN = 1200;     // min pulse (us) = full right
+const uint16_t SERVO_MAX = 1800;     // max pulse (us) = full left
 
 // ESC
 const uint16_t ESC_STOP_US = 1500;   // neutral / stop (us)
@@ -187,7 +191,7 @@ const uint16_t ESC_MAX_US = 2000;    // max ESC pulse (us)
 //   1680: C1 (2025 final course), 3 laps in 17.5s, 1st place.
 //   1600: C2 (2026 hairpin course), testing since 2026-10 (slower for the
 //         three hairpins). LOOKAHEAD_OFFSET_MM is still the 1680 value.
-const uint16_t SPEED_US = 1600;      // cruise pulse (us)
+const uint16_t SPEED_US = 1500;      // cruise pulse (us)
 
 // ============================================================================
 // Math constants
