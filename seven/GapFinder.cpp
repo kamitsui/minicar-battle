@@ -37,6 +37,7 @@ GapFinder::GapFinder()
       _frontPos(0),
       _frontFiltered(0),
       _enterCount(0),
+      _exitCount(0),
       _approachBalance(0.0f),
       _biasActive(false),
       _biasUntilMs(0),
@@ -105,15 +106,20 @@ void GapFinder::_updateMode(const SensorData* data) {
             }
             if (_cornerCount < 255) ++_cornerCount;
             _enterCount = 0;
+            _exitCount = 0;
             _approachBalance = 0.0f;
             _biasActive = false;
         }
-    } else if (_frontFiltered > CORNER_EXIT_FRONT_MM) {
-        if (_turnDir < 0 && POST_CORNER_BIAS_ENABLED) {
-            _biasActive = true;
-            _biasUntilMs = millis() + POST_CORNER_BIAS_MS;
+    } else {
+        _exitCount = (_frontFiltered > CORNER_EXIT_FRONT_MM) ? _exitCount + 1 : 0;
+        if (_exitCount >= CORNER_EXIT_DEBOUNCE) {
+            if (_turnDir < 0 && POST_CORNER_BIAS_ENABLED) {
+                _biasActive = true;
+                _biasUntilMs = millis() + POST_CORNER_BIAS_MS;
+            }
+            _turnDir = 0;
+            _exitCount = 0;
         }
-        _turnDir = 0;
     }
 }
 
@@ -130,10 +136,17 @@ float GapFinder::_effectiveDistance(const SensorData* data, int idx) const {
         // Straight: discount the side sensors (more on the right right
         // after a left corner).
         const float* weight = _biasActive ? LEFT_BIAS_WEIGHT : STRAIGHT_SIDE_WEIGHT;
-        return data[idx].distance * weight[idx];
+        float d = data[idx].distance * weight[idx];
+        if (TURN_DIR_SOURCE == TURN_DIR_SEQUENCE &&
+            SENSOR_ANGLES[idx] * _nextCornerDir() < 0.0f) {
+            d *= NEXT_CORNER_OPPOSITE_WEIGHT;  // away from the next corner
+        }
+        return d;
     }
-    // Corner: ignore sensors on the side opposite to the locked turn.
-    if (SENSOR_ANGLES[idx] * _turnDir < 0.0f) return 0.0f;
+    // Corner: ignore sensors on the side opposite to the locked turn (and
+    // the front sensor, which opens up before the turn is finished).
+    float side = SENSOR_ANGLES[idx] * _turnDir;
+    if (side < 0.0f || (CORNER_EXCLUDE_FRONT && side == 0.0f)) return 0.0f;
     return data[idx].distance;
 }
 

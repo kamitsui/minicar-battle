@@ -140,6 +140,31 @@ const uint8_t CORNER_SEQUENCE_START = 0;
 const bool CORNER_ONE_SIDED_TARGET = true;
 
 // ============================================================================
+// Corner hold (EXP-005)
+// Mid-turn, S3 starts to see down the next straight before the car has
+// finished turning. EXP-004 hairpin (1): S3 jumped ~900 -> 2000-2500 mm,
+// the target fell to ~-5 deg, Ld (S3 - offset) grew to ~1400 mm, St dropped
+// from -30 to -1.7 deg and the corner exited, so the car ran wide.
+//   CORNER_EXCLUDE_FRONT:   S3 is not a target candidate in corner mode.
+//   CORNER_LD_MM:           fixed Ld in corner mode (0 = use S3 as usual).
+//   CORNER_EXIT_DEBOUNCE:   consecutive frames above CORNER_EXIT_FRONT_MM
+//                           needed to leave corner mode.
+// ============================================================================
+const bool CORNER_EXCLUDE_FRONT = true;
+const float CORNER_LD_MM = 300.0;           // provisional
+const uint8_t CORNER_EXIT_DEBOUNCE = 8;     // provisional (~320 ms)
+
+// ============================================================================
+// Next-corner side bias (EXP-005, TURN_DIR_SEQUENCE only)
+// In straight mode, sensors on the side opposite to the next corner in
+// CORNER_SEQUENCE are multiplied by NEXT_CORNER_OPPOSITE_WEIGHT, on top of
+// STRAIGHT_SIDE_WEIGHT / LEFT_BIAS_WEIGHT. EXP-004: after hairpin (2) (next
+// corner left), S4 saw 2400-3500 mm through the shortcut exit while S3 read
+// ~1700 and the car turned into it. 1.0 = off.
+// ============================================================================
+const float NEXT_CORNER_OPPOSITE_WEIGHT = 0.4;  // provisional
+
+// ============================================================================
 // Post-left-corner bias (LOGIC_GATE_BIAS)
 // For POST_CORNER_BIAS_MS after leaving a left corner, straight mode uses
 // LEFT_BIAS_WEIGHT instead of STRAIGHT_SIDE_WEIGHT. It only changes which

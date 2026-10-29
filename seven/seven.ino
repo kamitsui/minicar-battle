@@ -76,6 +76,15 @@ void setup() {
     Logger::println(CORNER_SEQUENCE_START);
     Logger::print("Corner One-Sided Target: ");
     Logger::println(CORNER_ONE_SIDED_TARGET ? "ON" : "OFF");
+    Logger::print("Corner Hold: exclude S3 ");
+    Logger::print(CORNER_EXCLUDE_FRONT ? "ON" : "OFF");
+    Logger::print(", Ld ");
+    Logger::print(CORNER_LD_MM, 0);
+    Logger::print(", exit debounce ");
+    Logger::println(CORNER_EXIT_DEBOUNCE);
+    Logger::print("Next-Corner Opposite Weight: ");
+    Logger::print(NEXT_CORNER_OPPOSITE_WEIGHT, 2);
+    Logger::println();
     Logger::print("Servo MIN/CENTER/MAX: ");
     Logger::print(SERVO_MIN);
     Logger::print("/");

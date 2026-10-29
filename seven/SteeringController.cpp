@@ -66,6 +66,9 @@ float SteeringController::calculate(const GapResult& gap, const SensorData* sens
                   ? sensorData[FRONT_SENSOR_INDEX].distance - LOOKAHEAD_OFFSET_MM
                   : 1000.0f;  // fallback when the front sensor is invalid
 
+    // Corner mode: fixed Ld, since S3 opens up before the turn is done.
+    if (gap.mode != 0 && CORNER_LD_MM > 0.0f) Ld_mm = CORNER_LD_MM;
+
     // Avoid divide-by-zero / extreme values.
     if (Ld_mm < 50.0f) Ld_mm = 50.0f;
 

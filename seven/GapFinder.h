@@ -48,6 +48,7 @@ class GapFinder {
     uint16_t _frontFiltered;  // latest median (0 = no data yet)
 
     uint8_t _enterCount;     // consecutive frames below CORNER_ENTER_FRONT_MM
+    uint8_t _exitCount;      // consecutive frames above CORNER_EXIT_FRONT_MM
     float _approachBalance;  // summed (right - left) during the approach
     bool _biasActive;
     unsigned long _biasUntilMs;
