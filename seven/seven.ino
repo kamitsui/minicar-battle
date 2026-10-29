@@ -64,6 +64,14 @@ void setup() {
 #endif
     Logger::print("Sensor Enable Mask: 0x");
     Logger::println(String(SENSOR_ENABLE_MASK, HEX));
+    Logger::print("Sensor ROI (S0-S6):");
+    for (int i = 0; i < NUM_SENSORS; ++i) {
+        Logger::print(" ");
+        Logger::print(L1X_ROI_SIZE[i]);
+    }
+    Logger::println();
+    Logger::print("Wall Repel: ");
+    Logger::println(WALL_REPEL_ENABLED ? "ON (straight mode)" : "OFF");
     Logger::print("Measurement Interval: ");
     Logger::print(MEASUREMENT_INTERVAL);
     Logger::println("ms");
@@ -180,7 +188,7 @@ void loop() {
         float steering_angle = steeringController.calculate(gap, sensorData);
 
         // Debug: print target/steering angles
-        Logger::printSteering(steering_angle);
+        Logger::printSteering(steering_angle, steeringController.lastWallRepel());
 
         // =========================================================================
         // Phase 5: actuators

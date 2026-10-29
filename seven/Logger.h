@@ -98,7 +98,10 @@ class Logger {
     }
 
     // Steering angle, with a small visual indicator.
-    static void printSteering(float angle) {
+    // W: side-wall repel included in St (deg, + = right).
+    static void printSteering(float angle, float wallRepel) {
+        print(" W:");
+        print(wallRepel, 1);
         print(" St:");
         print(angle, 1);
         print(" ");

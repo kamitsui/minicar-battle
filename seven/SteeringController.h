@@ -13,6 +13,12 @@
 #include "GapFinder.h"
 
 class SteeringController {
+   private:
+    float _lastWallRepel;  // side-wall repel of the last call (deg)
+
+    // Steering added to keep off a side wall (deg, + = right).
+    float _wallRepel(const SensorData* sensorData) const;
+
    public:
     SteeringController();
 
@@ -21,6 +27,9 @@ class SteeringController {
 
     // Compute the steering angle (deg) using Pure Pursuit.
     float calculate(const GapResult& gap, const SensorData* sensorData);
+
+    // Side-wall repel included in the last calculate() result (deg).
+    float lastWallRepel() const { return _lastWallRepel; }
 };
 
 #endif  // STEERING_CONTROLLER_H

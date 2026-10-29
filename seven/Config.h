@@ -144,6 +144,23 @@ const float WHEELBASE_MM = 210.0;       // wheelbase (mm), MF-01X
 const float LOOKAHEAD_OFFSET_MM = 1100.0;
 
 // ============================================================================
+// Side-wall repel (EXP-003)
+// Pure Pursuit only aims at the most open direction, so nothing keeps the
+// car off a side wall on a straight (with the S3 ROI at 6, Ld grew from
+// ~100 to ~1400 mm and the steering became too weak to recover). When a
+// side sensor reads closer than WALL_REPEL_START_MM, steer away by up to
+// WALL_REPEL_MAX_DEG: 0 at the start distance, the max at contact. The
+// closest sensor on each side counts, and the two sides push against each
+// other. Straight mode only (corner mode turns along the inside wall).
+// 0 in WALL_REPEL_START_MM = sensor not used. Start distances are below the
+// lane-center readings in a 700 mm lane (2026-10-29: S0 ~330, S1 ~520,
+// S5 ~580, S6 ~330).
+// ============================================================================
+const bool WALL_REPEL_ENABLED = true;
+const float WALL_REPEL_START_MM[NUM_SENSORS] = {250, 400, 0, 0, 0, 400, 250};  // provisional
+const float WALL_REPEL_MAX_DEG = 20.0;  // provisional
+
+// ============================================================================
 // Safety
 // ============================================================================
 const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // front emergency-stop threshold (mm)
