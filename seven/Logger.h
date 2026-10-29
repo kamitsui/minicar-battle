@@ -80,9 +80,10 @@ class Logger {
     // mode: 0 = straight (S, or SL with the post-left-corner bias),
     //       -1 = corner left (CL), +1 = corner right (CR).
     // F: median-filtered front distance used by the gate (mm).
+    // C: corner entries since boot.
     static void printGapResult(float targetAngle, float targetDistance,
                                int8_t mode, bool leftBias,
-                               uint16_t frontFiltered) {
+                               uint16_t frontFiltered, uint8_t cornerCount) {
         print(" | T:");
         print(targetAngle, 1);
         print("° Ld:");
@@ -95,6 +96,8 @@ class Logger {
         }
         print(" F:");
         print(frontFiltered);
+        print(" C:");
+        print(cornerCount);
     }
 
     // Steering angle, with a small visual indicator.

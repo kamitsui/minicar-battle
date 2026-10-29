@@ -70,6 +70,18 @@ void setup() {
         Logger::print(L1X_ROI_SIZE[i]);
     }
     Logger::println();
+    Logger::print("Turn Direction: ");
+    Logger::println(TURN_DIR_SOURCE == TURN_DIR_SEQUENCE ? "SEQUENCE" : "BALANCE");
+    Logger::print("Corner Sequence Start: ");
+    Logger::println(CORNER_SEQUENCE_START);
+    Logger::print("Corner One-Sided Target: ");
+    Logger::println(CORNER_ONE_SIDED_TARGET ? "ON" : "OFF");
+    Logger::print("Servo MIN/CENTER/MAX: ");
+    Logger::print(SERVO_MIN);
+    Logger::print("/");
+    Logger::print(SERVO_CENTER);
+    Logger::print("/");
+    Logger::println(SERVO_MAX);
     Logger::print("Wall Repel: ");
     Logger::println(WALL_REPEL_ENABLED ? "ON (straight mode)" : "OFF");
     Logger::print("Measurement Interval: ");
@@ -180,7 +192,8 @@ void loop() {
                                ? sensorData[FRONT_SENSOR_INDEX].distance
                                : 0.0f;
         Logger::printGapResult(gap.target_angle, front_distance, gap.mode,
-                               gap.left_bias, gap.front_filtered);
+                               gap.left_bias, gap.front_filtered,
+                               gap.corner_count);
 
         // =========================================================================
         // Phase 4: steering angle (Pure Pursuit)

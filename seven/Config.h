@@ -112,6 +112,34 @@ const float APPROACH_FRONT_MM = 2000.0;      // start summing the turn direction
 const float STRAIGHT_SIDE_WEIGHT[NUM_SENSORS] = {0.4, 0.6, 1.0, 1.0, 1.0, 0.6, 0.4};  // provisional
 
 // ============================================================================
+// Turn direction source (EXP-004)
+//   TURN_DIR_BALANCE:  sign of the approach balance (above). Rejected for C2:
+//     it depends on the lateral position; entering on the inside line picked
+//     the wrong side at hairpins (1) and (2) (EXP-002 run 9, EXP-003 run 1).
+//   TURN_DIR_SEQUENCE: the n-th corner entry after boot uses
+//     CORNER_SEQUENCE[(CORNER_SEQUENCE_START + n) % CORNER_SEQUENCE_LEN].
+//     Risk: a missed or false corner entry shifts every later corner.
+// C2 order: hairpin (1) L, hairpin (2) R, hairpin (3) L, 90deg L, 90deg L.
+// CORNER_SEQUENCE_START: index of the first corner after boot (0 = from the
+// start line; set it when a steerpush starts mid-course, e.g. 1 = before
+// hairpin (2)).
+// ============================================================================
+#define TURN_DIR_BALANCE 0
+#define TURN_DIR_SEQUENCE 1
+#define TURN_DIR_SOURCE TURN_DIR_SEQUENCE  // select turn direction source here
+
+const uint8_t CORNER_SEQUENCE_LEN = 5;
+const int8_t CORNER_SEQUENCE[CORNER_SEQUENCE_LEN] = {-1, 1, -1, -1, -1};
+const uint8_t CORNER_SEQUENCE_START = 0;
+
+// Corner-mode target (EXP-004): in corner mode, the target angle uses only
+// the farthest sensor and its neighbor on the turn side. With both
+// neighbors, S3 as the farthest got pulled toward the opposite side by its
+// raw neighbor, and with Ld clamped near the wall the car steered +8 to +15
+// deg (right) in a left hairpin (EXP-003 run 2).
+const bool CORNER_ONE_SIDED_TARGET = true;
+
+// ============================================================================
 // Post-left-corner bias (LOGIC_GATE_BIAS)
 // For POST_CORNER_BIAS_MS after leaving a left corner, straight mode uses
 // LEFT_BIAS_WEIGHT instead of STRAIGHT_SIDE_WEIGHT. It only changes which
@@ -177,7 +205,10 @@ const unsigned long AUTO_STOP_SECONDS = 0;
 // History:
 //   1115(R)-1415(C)-1715(L): rejected 2026-10-29 (C2 steerpush drifted right
 //     with the steering near center).
-//   1200(R)-1500(C)-1800(L): in use since 2026-10-29 (less drift).
+//   1200(R)-1500(C)-1800(L): in use. EXP-003 drifted left with St +0.7 to
+//     +1 deg, but that run also had the corner steering bug.
+//   1180(R)-1480(C)-1780(L): tried 2026-10-29 (EXP-004); no clear drift
+//     either way, reverted to the nominal range.
 // Steering maps onto MIN..MAX, so shift all three together when trimming.
 const uint16_t SERVO_CENTER = 1500;  // center (us)
 const uint16_t SERVO_MIN = 1200;     // min pulse (us) = full right

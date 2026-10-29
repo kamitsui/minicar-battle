@@ -16,6 +16,8 @@
  * - _approachBalance: (right - left) distances summed while approaching a
  *   corner; its sign is the locked turn direction.
  * - _biasUntilMs: end of the post-left-corner bias window.
+ * - _cornerCount: corner entries since boot; picks the next direction from
+ *   CORNER_SEQUENCE under TURN_DIR_SEQUENCE.
  */
 
 #ifndef GAP_FINDER_H
@@ -32,6 +34,7 @@ struct GapResult {
     int8_t mode;         // 0 = straight, -1 = corner left, +1 = corner right
     bool left_bias;      // post-left-corner bias active (straight mode only)
     uint16_t front_filtered;  // median-filtered front distance used by the gate (mm)
+    uint8_t corner_count;     // corner entries since boot (TURN_DIR_SEQUENCE)
 };
 
 class GapFinder {
@@ -48,12 +51,16 @@ class GapFinder {
     float _approachBalance;  // summed (right - left) during the approach
     bool _biasActive;
     unsigned long _biasUntilMs;
+    uint8_t _cornerCount;
 
     // Push the front reading and update the median.
     void _updateFrontFilter(const SensorData* data);
 
     // Switch between straight and corner mode from the filtered front sensor.
     void _updateMode(const SensorData* data);
+
+    // Direction of the next corner in CORNER_SEQUENCE (-1 = left, +1 = right).
+    int8_t _nextCornerDir() const;
 
     // Distance used for farthest-sensor selection (0 = not selectable).
     float _effectiveDistance(const SensorData* data, int idx) const;

@@ -18,7 +18,9 @@
  * sensor selects straight or corner mode, which changes the distances used
  * for picking the farthest sensor (steps 1-2 only; step 3 uses raw
  * distances). LOGIC_GATE_BIAS also favors the left side for a short time
- * after a left corner.
+ * after a left corner. In corner mode the turn direction comes from
+ * Config.h TURN_DIR_SOURCE, and step 3 can drop the opposite-side neighbor
+ * (CORNER_ONE_SIDED_TARGET).
  *
  * Note: Ld (the lookahead distance) is computed in SteeringController from
  * the front sensor reading, not here.
@@ -37,7 +39,8 @@ GapFinder::GapFinder()
       _enterCount(0),
       _approachBalance(0.0f),
       _biasActive(false),
-      _biasUntilMs(0) {}
+      _biasUntilMs(0),
+      _cornerCount(0) {}
 
 // ============================================================================
 // Private
@@ -94,8 +97,13 @@ void GapFinder::_updateMode(const SensorData* data) {
 
         _enterCount = (_frontFiltered < CORNER_ENTER_FRONT_MM) ? _enterCount + 1 : 0;
         if (_enterCount >= CORNER_ENTER_DEBOUNCE) {
-            // Ties go left: the course is counter-clockwise.
-            _turnDir = (_approachBalance > 0.0f) ? 1 : -1;
+            if (TURN_DIR_SOURCE == TURN_DIR_SEQUENCE) {
+                _turnDir = _nextCornerDir();
+            } else {
+                // Ties go left: the course is counter-clockwise.
+                _turnDir = (_approachBalance > 0.0f) ? 1 : -1;
+            }
+            if (_cornerCount < 255) ++_cornerCount;
             _enterCount = 0;
             _approachBalance = 0.0f;
             _biasActive = false;
@@ -107,6 +115,11 @@ void GapFinder::_updateMode(const SensorData* data) {
         }
         _turnDir = 0;
     }
+}
+
+int8_t GapFinder::_nextCornerDir() const {
+    return CORNER_SEQUENCE[(CORNER_SEQUENCE_START + _cornerCount) %
+                           CORNER_SEQUENCE_LEN];
 }
 
 float GapFinder::_effectiveDistance(const SensorData* data, int idx) const {
@@ -170,6 +183,10 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
     bool has_left = (left_idx >= 0 && data[left_idx].valid);
     bool has_right = (right_idx >= 0 && data[right_idx].valid);
 
+    // Corner mode: drop the neighbor on the side opposite to the turn.
+    if (CORNER_ONE_SIDED_TARGET && _turnDir < 0) has_right = false;
+    if (CORNER_ONE_SIDED_TARGET && _turnDir > 0) has_left = false;
+
     if (has_left && has_right) {
         // Both neighbors valid: triangle-area weighting.
         float angle_diff_left =
@@ -218,13 +235,14 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 // ============================================================================
 
 GapResult GapFinder::find(const SensorData* data) {
-    GapResult result = {0.0f, 0, false, 0};
+    GapResult result = {0.0f, 0, false, 0, 0};
 
     // Step 0: straight/corner mode from the front sensor.
     _updateMode(data);
     result.mode = _turnDir;
     result.left_bias = _biasActive && _turnDir == 0;
     result.front_filtered = _frontFiltered;
+    result.corner_count = _cornerCount;
 
     // Step 1: pick the farthest sensor.
     float farthest_dist;
