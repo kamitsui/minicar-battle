@@ -41,7 +41,13 @@ GapFinder::GapFinder()
       _approachBalance(0.0f),
       _biasActive(false),
       _biasUntilMs(0),
-      _cornerCount(0) {}
+      _cornerCount(0),
+      _edgeNearAge(255),
+      _edgeFarCount(0),
+      _edgePending(-1),
+      _edgeEntry(false),
+      _exitArmed(true),
+      _cornerFrames(0) {}
 
 // ============================================================================
 // Private
@@ -96,22 +102,26 @@ void GapFinder::_updateMode(const SensorData* data) {
             _approachBalance = 0.0f;
         }
 
-        _enterCount = (_frontFiltered < CORNER_ENTER_FRONT_MM) ? _enterCount + 1 : 0;
-        if (_enterCount >= CORNER_ENTER_DEBOUNCE) {
-            if (TURN_DIR_SOURCE == TURN_DIR_SEQUENCE) {
-                _turnDir = _nextCornerDir();
-            } else {
-                // Ties go left: the course is counter-clockwise.
-                _turnDir = (_approachBalance > 0.0f) ? 1 : -1;
-            }
-            if (_cornerCount < 255) ++_cornerCount;
-            _enterCount = 0;
-            _exitCount = 0;
-            _approachBalance = 0.0f;
-            _biasActive = false;
+        // Hairpin edge entry (EXP-006): the inner wall ended.
+        if (_hairpinEdge(data) && _edgePending < 0) _edgePending = EDGE_ENTRY_DELAY;
+        if (_edgePending == 0) {
+            _enterCorner(true);
+            return;
         }
+        if (_edgePending > 0) --_edgePending;
+
+        _enterCount = (_frontFiltered < CORNER_ENTER_FRONT_MM) ? _enterCount + 1 : 0;
+        if (_enterCount >= CORNER_ENTER_DEBOUNCE) _enterCorner(false);
     } else {
-        _exitCount = (_frontFiltered > CORNER_EXIT_FRONT_MM) ? _exitCount + 1 : 0;
+        if (_cornerFrames < 255) ++_cornerFrames;
+        // After an edge entry the front is still far; count the exit only
+        // once it has closed in (or after EDGE_EXIT_ARM_FRAMES).
+        if (!_exitArmed && (_frontFiltered < CORNER_EXIT_FRONT_MM ||
+                            _cornerFrames >= EDGE_EXIT_ARM_FRAMES)) {
+            _exitArmed = true;
+        }
+        _exitCount = (_exitArmed && _frontFiltered > CORNER_EXIT_FRONT_MM)
+                     ? _exitCount + 1 : 0;
         if (_exitCount >= CORNER_EXIT_DEBOUNCE) {
             if (_turnDir < 0 && POST_CORNER_BIAS_ENABLED) {
                 _biasActive = true;
@@ -119,8 +129,53 @@ void GapFinder::_updateMode(const SensorData* data) {
             }
             _turnDir = 0;
             _exitCount = 0;
+            _edgeEntry = false;
         }
     }
+}
+
+void GapFinder::_enterCorner(bool byEdge) {
+    if (TURN_DIR_SOURCE == TURN_DIR_SEQUENCE) {
+        _turnDir = _nextCornerDir();
+    } else {
+        // Ties go left: the course is counter-clockwise.
+        _turnDir = (_approachBalance > 0.0f) ? 1 : -1;
+    }
+    if (_cornerCount < 255) ++_cornerCount;
+    _enterCount = 0;
+    _exitCount = 0;
+    _approachBalance = 0.0f;
+    _biasActive = false;
+    _edgeEntry = byEdge;
+    _exitArmed = !byEdge;
+    _cornerFrames = 0;
+    _edgePending = -1;
+    _edgeNearAge = 255;
+    _edgeFarCount = 0;
+}
+
+bool GapFinder::_hairpinEdge(const SensorData* data) {
+    if (TURN_DIR_SOURCE != TURN_DIR_SEQUENCE) return false;
+
+    // Inner side of the next corner: S0 for a left turn, S6 for a right turn.
+    const SensorData& s = data[_nextCornerDir() < 0 ? 0 : NUM_SENSORS - 1];
+    if (s.valid && s.distance < EDGE_NEAR_MM) {
+        _edgeNearAge = 0;
+    } else if (_edgeNearAge < 255) {
+        ++_edgeNearAge;
+    }
+    if (s.valid && s.distance > EDGE_FAR_MM) {
+        if (_edgeFarCount < 255) ++_edgeFarCount;
+    } else {
+        _edgeFarCount = 0;
+    }
+
+    uint8_t idx = (CORNER_SEQUENCE_START + _cornerCount) % CORNER_SEQUENCE_LEN;
+    // Fires once, on the EDGE_FAR_FRAMES-th far frame, if the side was near
+    // within EDGE_NEAR_WINDOW frames before the far run started.
+    return HAIRPIN_EDGE_ENTRY[idx] && _edgeFarCount == EDGE_FAR_FRAMES &&
+           _edgeNearAge <= EDGE_NEAR_WINDOW + EDGE_FAR_FRAMES - 1 &&
+           _frontFiltered < EDGE_MAX_FRONT_MM;
 }
 
 int8_t GapFinder::_nextCornerDir() const {
@@ -248,7 +303,7 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 // ============================================================================
 
 GapResult GapFinder::find(const SensorData* data) {
-    GapResult result = {0.0f, 0, false, 0, 0};
+    GapResult result = {0.0f, 0, false, 0, 0, false};
 
     // Step 0: straight/corner mode from the front sensor.
     _updateMode(data);
@@ -256,6 +311,7 @@ GapResult GapFinder::find(const SensorData* data) {
     result.left_bias = _biasActive && _turnDir == 0;
     result.front_filtered = _frontFiltered;
     result.corner_count = _cornerCount;
+    result.edge_entry = _edgeEntry && _turnDir != 0;
 
     // Step 1: pick the farthest sensor.
     float farthest_dist;

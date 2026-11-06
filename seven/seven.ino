@@ -85,6 +85,26 @@ void setup() {
     Logger::print("Next-Corner Opposite Weight: ");
     Logger::print(NEXT_CORNER_OPPOSITE_WEIGHT, 2);
     Logger::println();
+    Logger::print("Hairpin Edge Entry: corners");
+    for (int i = 0; i < CORNER_SEQUENCE_LEN; ++i) {
+        if (HAIRPIN_EDGE_ENTRY[i]) {
+            Logger::print(" ");
+            Logger::print(i + 1);
+        }
+    }
+    Logger::print(", near ");
+    Logger::print(EDGE_NEAR_MM);
+    Logger::print(" far ");
+    Logger::print(EDGE_FAR_MM);
+    Logger::print(" front< ");
+    Logger::print(EDGE_MAX_FRONT_MM, 0);
+    Logger::print(" delay ");
+    Logger::println(EDGE_ENTRY_DELAY);
+    Logger::print("Straight Ld Min: ");
+    Logger::print(STRAIGHT_LD_MIN_MM, 0);
+    Logger::println();
+    Logger::print("Emergency Keep Steer In Corner: ");
+    Logger::println(EMERGENCY_KEEP_STEER_IN_CORNER ? "ON" : "OFF");
     Logger::print("Servo MIN/CENTER/MAX: ");
     Logger::print(SERVO_MIN);
     Logger::print("/");
@@ -202,7 +222,7 @@ void loop() {
                                : 0.0f;
         Logger::printGapResult(gap.target_angle, front_distance, gap.mode,
                                gap.left_bias, gap.front_filtered,
-                               gap.corner_count);
+                               gap.corner_count, gap.edge_entry);
 
         // =========================================================================
         // Phase 4: steering angle (Pure Pursuit)
@@ -216,8 +236,10 @@ void loop() {
         // Phase 5: actuators
         // =========================================================================
         if (emergency_stop) {
-            // Emergency stop: center the steering and cut power.
-            actuator.setSteering(0.0);
+            // Emergency stop: cut power. Center the steering, except in
+            // corner mode (EMERGENCY_KEEP_STEER_IN_CORNER).
+            bool keep = EMERGENCY_KEEP_STEER_IN_CORNER && gap.mode != 0;
+            actuator.setSteering(keep ? steering_angle : 0.0);
             actuator.stop();
         } else {
             // Normal cruise.

@@ -81,9 +81,11 @@ class Logger {
     //       -1 = corner left (CL), +1 = corner right (CR).
     // F: median-filtered front distance used by the gate (mm).
     // C: corner entries since boot.
+    // E: 1 while in a corner entered by the hairpin edge (EXP-006).
     static void printGapResult(float targetAngle, float targetDistance,
                                int8_t mode, bool leftBias,
-                               uint16_t frontFiltered, uint8_t cornerCount) {
+                               uint16_t frontFiltered, uint8_t cornerCount,
+                               bool edgeEntry) {
         print(" | T:");
         print(targetAngle, 1);
         print("° Ld:");
@@ -98,6 +100,7 @@ class Logger {
         print(frontFiltered);
         print(" C:");
         print(cornerCount);
+        print(edgeEntry ? " E:1" : " E:0");
     }
 
     // Steering angle, with a small visual indicator.

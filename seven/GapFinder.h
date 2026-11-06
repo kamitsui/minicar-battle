@@ -18,6 +18,8 @@
  * - _biasUntilMs: end of the post-left-corner bias window.
  * - _cornerCount: corner entries since boot; picks the next direction from
  *   CORNER_SEQUENCE under TURN_DIR_SEQUENCE.
+ * - _edgeNearAge / _edgeFarCount: inner-side sensor history for the
+ *   hairpin edge entry (EXP-006).
  */
 
 #ifndef GAP_FINDER_H
@@ -35,6 +37,7 @@ struct GapResult {
     bool left_bias;      // post-left-corner bias active (straight mode only)
     uint16_t front_filtered;  // median-filtered front distance used by the gate (mm)
     uint8_t corner_count;     // corner entries since boot (TURN_DIR_SEQUENCE)
+    bool edge_entry;          // current corner was entered by the hairpin edge
 };
 
 class GapFinder {
@@ -54,6 +57,13 @@ class GapFinder {
     unsigned long _biasUntilMs;
     uint8_t _cornerCount;
 
+    uint8_t _edgeNearAge;   // frames since the inner side read near
+    uint8_t _edgeFarCount;  // consecutive frames the inner side read far
+    int8_t _edgePending;    // frames until an edge entry (-1 = none)
+    bool _edgeEntry;        // current corner entered by the edge
+    bool _exitArmed;        // exit counting allowed (see EDGE_EXIT_ARM_FRAMES)
+    uint8_t _cornerFrames;  // frames since the corner entry
+
     // Push the front reading and update the median.
     void _updateFrontFilter(const SensorData* data);
 
@@ -62,6 +72,12 @@ class GapFinder {
 
     // Direction of the next corner in CORNER_SEQUENCE (-1 = left, +1 = right).
     int8_t _nextCornerDir() const;
+
+    // Track the inner-side sensor; true on the frame a hairpin edge fires.
+    bool _hairpinEdge(const SensorData* data);
+
+    // Lock the next corner (turn direction, counters).
+    void _enterCorner(bool byEdge);
 
     // Distance used for farthest-sensor selection (0 = not selectable).
     float _effectiveDistance(const SensorData* data, int idx) const;

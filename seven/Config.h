@@ -165,6 +165,38 @@ const uint8_t CORNER_EXIT_DEBOUNCE = 8;     // provisional (~320 ms)
 const float NEXT_CORNER_OPPOSITE_WEIGHT = 0.4;  // provisional
 
 // ============================================================================
+// Hairpin edge entry (EXP-006, TURN_DIR_SEQUENCE only)
+// The front gate (CORNER_ENTER_FRONT_MM) fires once the outer wall is
+// ~1.1 m ahead, well after the inner divider of a hairpin has ended, so the
+// car turned too late and hit the outer wall (EXP-005 hairpins (1) and (3):
+// the inner side opened 35 / 37 frames before the gate fired).
+// For corners flagged in HAIRPIN_EDGE_ENTRY, straight mode also enters the
+// corner when the inner-side sensor (S0 for a left turn, S6 for a right
+// turn) goes from near to far:
+//   near: read < EDGE_NEAR_MM within the last EDGE_NEAR_WINDOW frames;
+//   far:  read > EDGE_FAR_MM for EDGE_FAR_FRAMES frames in a row;
+//   and the filtered front is below EDGE_MAX_FRONT_MM.
+// EDGE_ENTRY_DELAY frames later the corner starts (0 = at once).
+// After an edge entry the front is still above CORNER_EXIT_FRONT_MM, so the
+// exit only counts once F has dropped below it, or after
+// EDGE_EXIT_ARM_FRAMES frames in the corner.
+// Not flagged: hairpin (2) (the shortcut opening sits on its inner side) and
+// the 90-deg corners (an S0 edge fired 56 frames early before 90L-2).
+// If no edge shows up (different line), the front gate still enters.
+// Replay of the EXP-005 logs: hairpin (1) 35 / 39 frames earlier, hairpin
+// (3) 37 frames earlier in one run and no edge (gate fallback) in the other;
+// no false edges on the flagged corners.
+// ============================================================================
+const bool HAIRPIN_EDGE_ENTRY[CORNER_SEQUENCE_LEN] = {true, false, true, false, false};
+const uint16_t EDGE_NEAR_MM = 600;          // provisional
+const uint16_t EDGE_FAR_MM = 1000;          // provisional
+const uint8_t EDGE_NEAR_WINDOW = 10;        // frames
+const uint8_t EDGE_FAR_FRAMES = 2;          // frames
+const float EDGE_MAX_FRONT_MM = 2500.0;     // provisional
+const uint8_t EDGE_ENTRY_DELAY = 0;         // frames; raise if it cuts the divider tip
+const uint8_t EDGE_EXIT_ARM_FRAMES = 25;    // frames (~1 s)
+
+// ============================================================================
 // Post-left-corner bias (LOGIC_GATE_BIAS)
 // For POST_CORNER_BIAS_MS after leaving a left corner, straight mode uses
 // LEFT_BIAS_WEIGHT instead of STRAIGHT_SIDE_WEIGHT. It only changes which
@@ -196,6 +228,12 @@ const float WHEELBASE_MM = 210.0;       // wheelbase (mm), MF-01X
 // Manually tuned. Sweep history: SPEED 1640 -> 900, 1660 -> 1000, 1680 -> 1100, > 1680 -> 1200.
 const float LOOKAHEAD_OFFSET_MM = 1100.0;
 
+// Straight-mode floor for Ld (EXP-006). Near a wall, S3 - offset drops to
+// the 50 mm clamp and a small target becomes a large steer: EXP-005 frame
+// 1012, T +2.3 deg with S3 1135 gave St +18.5 (right) just before hairpin (3).
+// With 300 the same frame gives ~+3 deg. Corner mode uses CORNER_LD_MM.
+const float STRAIGHT_LD_MIN_MM = 300.0;  // provisional
+
 // ============================================================================
 // Side-wall repel (EXP-003)
 // Pure Pursuit only aims at the most open direction, so nothing keeps the
@@ -217,6 +255,10 @@ const float WALL_REPEL_MAX_DEG = 20.0;  // provisional
 // Safety
 // ============================================================================
 const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // front emergency-stop threshold (mm)
+// Emergency stop in corner mode keeps the computed steering instead of
+// centering it (the drive is cut either way). EXP-005 hairpin (1): S3 < 400
+// mid-turn centered the servo and the car went straight into the outer wall.
+const bool EMERGENCY_KEEP_STEER_IN_CORNER = true;
 
 // Auto-stop timeout (debug aid).
 // 0 disables it; otherwise the car stops after this many seconds.

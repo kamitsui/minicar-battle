@@ -68,6 +68,8 @@ float SteeringController::calculate(const GapResult& gap, const SensorData* sens
 
     // Corner mode: fixed Ld, since S3 opens up before the turn is done.
     if (gap.mode != 0 && CORNER_LD_MM > 0.0f) Ld_mm = CORNER_LD_MM;
+    // Straight mode: keep the gain bounded near a wall.
+    if (gap.mode == 0 && Ld_mm < STRAIGHT_LD_MIN_MM) Ld_mm = STRAIGHT_LD_MIN_MM;
 
     // Avoid divide-by-zero / extreme values.
     if (Ld_mm < 50.0f) Ld_mm = 50.0f;
