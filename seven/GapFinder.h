@@ -22,6 +22,10 @@
  *   hairpin edge entry (EXP-006).
  * - _seqStart: index of the first corner in CORNER_SEQUENCE; starts at
  *   CORNER_SEQUENCE_START and can be changed with reset() (serial command).
+ * - _cp: per-corner values, from CORNER_PARAMS; changed by setParam()
+ *   (serial command) and kept across reset().
+ * - _cornerIdx / _exitInnerSeen: the current corner, and whether its
+ *   inner-side sensor read near during the current exit run (EXP-007).
  */
 
 #ifndef GAP_FINDER_H
@@ -52,7 +56,7 @@ class GapFinder {
     uint8_t _frontPos;     // next write position
     uint16_t _frontFiltered;  // latest median (0 = no data yet)
 
-    uint8_t _enterCount;     // consecutive frames below CORNER_ENTER_FRONT_MM
+    uint8_t _enterCount;     // consecutive frames below the corner's gate
     uint8_t _exitCount;      // consecutive frames above CORNER_EXIT_FRONT_MM
     float _approachBalance;  // summed (right - left) during the approach
     bool _biasActive;
@@ -66,6 +70,12 @@ class GapFinder {
     bool _exitArmed;        // exit counting allowed (see EDGE_EXIT_ARM_FRAMES)
     uint8_t _cornerFrames;  // frames since the corner entry
     uint8_t _seqStart;      // CORNER_SEQUENCE index of the first corner
+    uint8_t _cornerIdx;     // CORNER_SEQUENCE index of the current corner
+    bool _exitInnerSeen;    // inner side near during this exit run
+    CornerParams _cp[CORNER_SEQUENCE_LEN];  // per-corner values
+
+    // CORNER_SEQUENCE index of the next corner.
+    uint8_t _nextIdx() const;
 
     // Push the front reading and update the median.
     void _updateFrontFilter(const SensorData* data);
@@ -107,6 +117,11 @@ class GapFinder {
     void reset(uint8_t seqStart);
 
     uint8_t sequenceStart() const { return _seqStart; }
+
+    // Per-corner values (CORNER_PARAMS). key: "gate", "edgemax", "delay",
+    // "exitin". Returns false for an unknown key or a value out of range.
+    bool setParam(uint8_t idx, const String& key, long value);
+    const CornerParams& params(uint8_t idx) const { return _cp[idx]; }
 };
 
 #endif  // GAP_FINDER_H

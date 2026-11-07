@@ -48,7 +48,11 @@ GapFinder::GapFinder()
       _edgeEntry(false),
       _exitArmed(true),
       _cornerFrames(0),
-      _seqStart(CORNER_SEQUENCE_START) {}
+      _seqStart(CORNER_SEQUENCE_START),
+      _cornerIdx(0),
+      _exitInnerSeen(false) {
+    for (uint8_t i = 0; i < CORNER_SEQUENCE_LEN; ++i) _cp[i] = CORNER_PARAMS[i];
+}
 
 // ============================================================================
 // Private
@@ -104,14 +108,14 @@ void GapFinder::_updateMode(const SensorData* data) {
         }
 
         // Hairpin edge entry (EXP-006): the inner wall ended.
-        if (_hairpinEdge(data) && _edgePending < 0) _edgePending = EDGE_ENTRY_DELAY;
+        if (_hairpinEdge(data) && _edgePending < 0) _edgePending = _cp[_nextIdx()].delay;
         if (_edgePending == 0) {
             _enterCorner(true);
             return;
         }
         if (_edgePending > 0) --_edgePending;
 
-        _enterCount = (_frontFiltered < CORNER_ENTER_FRONT_MM) ? _enterCount + 1 : 0;
+        _enterCount = (_frontFiltered < _cp[_nextIdx()].gate) ? _enterCount + 1 : 0;
         if (_enterCount >= CORNER_ENTER_DEBOUNCE) _enterCorner(false);
     } else {
         if (_cornerFrames < 255) ++_cornerFrames;
@@ -121,9 +125,19 @@ void GapFinder::_updateMode(const SensorData* data) {
                             _cornerFrames >= EDGE_EXIT_ARM_FRAMES)) {
             _exitArmed = true;
         }
-        _exitCount = (_exitArmed && _frontFiltered > CORNER_EXIT_FRONT_MM)
-                     ? _exitCount + 1 : 0;
-        if (_exitCount >= CORNER_EXIT_DEBOUNCE) {
+        bool open = _exitArmed && _frontFiltered > CORNER_EXIT_FRONT_MM;
+        _exitCount = open ? _exitCount + 1 : 0;
+        // Per-corner exitIn (EXP-007): the inner-side sensor must also see
+        // the divider again during this run, unless the run gets long.
+        uint16_t exitIn = _cp[_cornerIdx].exitIn;
+        const SensorData& inner = data[_turnDir < 0 ? 0 : NUM_SENSORS - 1];
+        if (!open) {
+            _exitInnerSeen = false;
+        } else if (exitIn == 0 || (inner.valid && inner.distance < exitIn)) {
+            _exitInnerSeen = true;
+        }
+        if (_exitCount >= CORNER_EXIT_DEBOUNCE &&
+            (_exitInnerSeen || _exitCount >= CORNER_EXIT_FALLBACK)) {
             if (_turnDir < 0 && POST_CORNER_BIAS_ENABLED) {
                 _biasActive = true;
                 _biasUntilMs = millis() + POST_CORNER_BIAS_MS;
@@ -136,6 +150,8 @@ void GapFinder::_updateMode(const SensorData* data) {
 }
 
 void GapFinder::_enterCorner(bool byEdge) {
+    _cornerIdx = _nextIdx();
+    _exitInnerSeen = false;
     if (TURN_DIR_SOURCE == TURN_DIR_SEQUENCE) {
         _turnDir = _nextCornerDir();
     } else {
@@ -171,16 +187,20 @@ bool GapFinder::_hairpinEdge(const SensorData* data) {
         _edgeFarCount = 0;
     }
 
-    uint8_t idx = (_seqStart + _cornerCount) % CORNER_SEQUENCE_LEN;
     // Fires once, on the EDGE_FAR_FRAMES-th far frame, if the side was near
     // within EDGE_NEAR_WINDOW frames before the far run started.
-    return HAIRPIN_EDGE_ENTRY[idx] && _edgeFarCount == EDGE_FAR_FRAMES &&
+    uint16_t edgeMax = _cp[_nextIdx()].edgeMax;
+    return edgeMax > 0 && _edgeFarCount == EDGE_FAR_FRAMES &&
            _edgeNearAge <= EDGE_NEAR_WINDOW + EDGE_FAR_FRAMES - 1 &&
-           _frontFiltered < EDGE_MAX_FRONT_MM;
+           _frontFiltered < edgeMax;
+}
+
+uint8_t GapFinder::_nextIdx() const {
+    return (_seqStart + _cornerCount) % CORNER_SEQUENCE_LEN;
 }
 
 int8_t GapFinder::_nextCornerDir() const {
-    return CORNER_SEQUENCE[(_seqStart + _cornerCount) % CORNER_SEQUENCE_LEN];
+    return CORNER_SEQUENCE[_nextIdx()];
 }
 
 float GapFinder::_effectiveDistance(const SensorData* data, int idx) const {
@@ -303,8 +323,28 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 // ============================================================================
 
 void GapFinder::reset(uint8_t seqStart) {
+    CornerParams cp[CORNER_SEQUENCE_LEN];
+    memcpy(cp, _cp, sizeof(cp));  // keep values set at runtime
     *this = GapFinder();
+    memcpy(_cp, cp, sizeof(cp));
     _seqStart = seqStart % CORNER_SEQUENCE_LEN;
+}
+
+bool GapFinder::setParam(uint8_t idx, const String& key, long value) {
+    if (idx >= CORNER_SEQUENCE_LEN) return false;
+    CornerParams& p = _cp[idx];
+    if (key == "gate" && value >= 300 && value < CORNER_EXIT_FRONT_MM) {
+        p.gate = (uint16_t)value;
+    } else if (key == "edgemax" && (value == 0 || (value >= 500 && value <= 4000))) {
+        p.edgeMax = (uint16_t)value;
+    } else if (key == "delay" && value >= 0 && value <= 20) {
+        p.delay = (uint8_t)value;
+    } else if (key == "exitin" && (value == 0 || (value >= 200 && value <= 3000))) {
+        p.exitIn = (uint16_t)value;
+    } else {
+        return false;
+    }
+    return true;
 }
 
 GapResult GapFinder::find(const SensorData* data) {

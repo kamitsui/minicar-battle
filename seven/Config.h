@@ -29,24 +29,37 @@
 // Log outputs (only when ENABLE_SERIAL)
 // USB: the PC serial monitor. UART: Serial1 (D1 TX) to the M5StickC Plus2
 // logger for untethered debug runs (5 V -> 3.3 V divider on the line).
-// Turn USB off if the loop time goes over MEASUREMENT_INTERVAL with it on.
-// USB_WAIT_MS: how long setup() waits for a PC on USB; 0 = wait forever
-// (tethered runs, so the banner is not missed). Untethered runs need > 0,
-// or the car never starts.
+// LOG_TO_USB:
+//   USB_LOG_FULL  everything, frame lines included
+//   USB_LOG_INFO  boot banner and command replies only; frame lines go to
+//                 the M5 only (debug runs: settings visible on the PC)
+//   USB_LOG_OFF   nothing on USB, no wait for a PC at boot (race)
+// USB_WAIT_MS: how long setup() waits for a PC on USB (FULL / INFO); 0 = wait
+// forever (tethered runs, so the banner is not missed). Untethered runs need
+// > 0, or the car never starts.
 // ============================================================================
-const bool LOG_TO_USB = true;
+#define USB_LOG_OFF 0
+#define USB_LOG_INFO 1
+#define USB_LOG_FULL 2
+const uint8_t LOG_TO_USB = USB_LOG_INFO;
 const bool LOG_TO_UART = true;
 const unsigned long LOG_UART_BAUD = 1000000;  // exact divider on RA4M1 and ESP32
 const unsigned long USB_WAIT_MS = 3000;
 
 // ============================================================================
-// Serial commands (USB serial monitor, one per line; only when ENABLE_SERIAL)
+// Serial commands (one per line; only when ENABLE_SERIAL)
+// From the USB serial monitor, and from the M5 logger on Serial1 RX (D0)
+// when CMD_FROM_UART (phone / PC -> WiFi -> M5 -> Nano). Race build:
+// CMD_FROM_UART = false (no external control while running).
 //   start N   next corner = CORNER_SEQUENCE[N] (0 h1, 1 h2, 2 h3, 3 90L-1,
 //             4 90L-2), and back to the boot state (no corners counted,
 //             straight mode): set up a partial-course test without flashing
 //   reset     back to the boot state, same start corner (repeat a test)
 //   speed US  cruise pulse, CMD_SPEED_MIN_US..CMD_SPEED_MAX_US
-//   get       print the current values
+//   set N KEY V  per-corner value for corner N (CORNER_PARAMS):
+//             gate | edgemax | delay | exitin
+//   get       print the current settings only (start, speed, servo, the
+//             per-corner table), no sensor data
 //   help      print this list
 // Changes are not saved: a reboot goes back to the values in this file.
 // Each change is logged as "# SET ..." (tools/plot_log.py and the M5 screen
@@ -54,6 +67,7 @@ const unsigned long USB_WAIT_MS = 3000;
 // ============================================================================
 const uint16_t CMD_SPEED_MIN_US = 1500;  // ESC neutral: no reverse from a typo
 const uint16_t CMD_SPEED_MAX_US = 1750;
+const bool CMD_FROM_UART = true;
 
 // ============================================================================
 // Hardware
@@ -116,7 +130,7 @@ const float FARTHEST_HYSTERESIS = 100.0;  // hysteresis for farthest-sensor swit
 // ============================================================================
 // Front gate (LOGIC_GATE, LOGIC_GATE_BIAS)
 // The front sensor (S3), median-filtered, tells straights from corners:
-//   Straight mode (until filtered S3 < CORNER_ENTER_FRONT_MM for
+//   Straight mode (until filtered S3 < the next corner's gate (CORNER_PARAMS) for
 //     CORNER_ENTER_DEBOUNCE frames): side sensors are discounted by
 //     STRAIGHT_SIDE_WEIGHT so wall openings (shortcut gaps) do not beat
 //     the road ahead.
@@ -136,8 +150,7 @@ const float FARTHEST_HYSTERESIS = 100.0;  // hysteresis for farthest-sensor swit
 const bool FRONT_GATE_ENABLED = (GAP_LOGIC != LOGIC_BASELINE);
 const uint8_t FRONT_MEDIAN_WINDOW = 5;       // frames (~200 ms); gate input only
 const uint8_t CORNER_ENTER_DEBOUNCE = 3;     // consecutive frames below ENTER
-const float CORNER_ENTER_FRONT_MM = 1200.0;  // provisional; from replay
-const float CORNER_EXIT_FRONT_MM = 2000.0;   // provisional; must be > ENTER
+const float CORNER_EXIT_FRONT_MM = 2000.0;   // provisional; must be > every gate
 const float APPROACH_FRONT_MM = 2000.0;      // start summing the turn direction
 const float STRAIGHT_SIDE_WEIGHT[NUM_SENSORS] = {0.4, 0.6, 1.0, 1.0, 1.0, 0.6, 0.4};  // provisional
 
@@ -196,35 +209,79 @@ const float NEXT_CORNER_OPPOSITE_WEIGHT = 0.4;  // provisional
 
 // ============================================================================
 // Hairpin edge entry (EXP-006, TURN_DIR_SEQUENCE only)
-// The front gate (CORNER_ENTER_FRONT_MM) fires once the outer wall is
+// The front gate (gate in CORNER_PARAMS) fires once the outer wall is
 // ~1.1 m ahead, well after the inner divider of a hairpin has ended, so the
 // car turned too late and hit the outer wall (EXP-005 hairpins (1) and (3):
 // the inner side opened 35 / 37 frames before the gate fired).
-// For corners flagged in HAIRPIN_EDGE_ENTRY, straight mode also enters the
+// For corners with edgeMax > 0 (CORNER_PARAMS), straight mode also enters the
 // corner when the inner-side sensor (S0 for a left turn, S6 for a right
 // turn) goes from near to far:
 //   near: read < EDGE_NEAR_MM within the last EDGE_NEAR_WINDOW frames;
 //   far:  read > EDGE_FAR_MM for EDGE_FAR_FRAMES frames in a row;
-//   and the filtered front is below EDGE_MAX_FRONT_MM.
-// EDGE_ENTRY_DELAY frames later the corner starts (0 = at once).
+//   and the filtered front is below that corner's edgeMax.
+// That corner's delay frames later the corner starts (0 = at once).
 // After an edge entry the front is still above CORNER_EXIT_FRONT_MM, so the
 // exit only counts once F has dropped below it, or after
 // EDGE_EXIT_ARM_FRAMES frames in the corner.
-// Not flagged: hairpin (2) (the shortcut opening sits on its inner side) and
+// No edge entry (edgeMax 0): hairpin (2) (the shortcut opening sits on its inner side) and
 // the 90-deg corners (an S0 edge fired 56 frames early before 90L-2).
 // If no edge shows up (different line), the front gate still enters.
 // Replay of the EXP-005 logs: hairpin (1) 35 / 39 frames earlier, hairpin
 // (3) 37 frames earlier in one run and no edge (gate fallback) in the other;
 // no false edges on the flagged corners.
 // ============================================================================
-const bool HAIRPIN_EDGE_ENTRY[CORNER_SEQUENCE_LEN] = {true, false, true, false, false};
 const uint16_t EDGE_NEAR_MM = 600;          // provisional
-const uint16_t EDGE_FAR_MM = 1000;          // provisional
+// History: EDGE_FAR_MM 1000 -> 1300 (EXP-007): S0 hovering at 1014-1032 on
+//   the mock straight fired a false edge once edgeMax was raised (b0012);
+//   real edges jump to 1550-2300 (10/29 h1 / h3, mock b0021).
+const uint16_t EDGE_FAR_MM = 1300;          // provisional
 const uint8_t EDGE_NEAR_WINDOW = 10;        // frames
 const uint8_t EDGE_FAR_FRAMES = 2;          // frames
-const float EDGE_MAX_FRONT_MM = 2500.0;     // provisional
-const uint8_t EDGE_ENTRY_DELAY = 0;         // frames; raise if it cuts the divider tip
 const uint8_t EDGE_EXIT_ARM_FRAMES = 25;    // frames (~1 s)
+
+// ============================================================================
+// Per-corner values (EXP-007), index = CORNER_SEQUENCE index
+// The hairpins differ (divider end to outer wall: h1 220 cm, h2 190 cm,
+// h3 185 cm; h1 has a curtain behind, the others a 120 mm wall), so the
+// distance decisions are per corner. Runtime: "set N KEY V" (serial).
+//   gate:    front gate, enter when F < gate for CORNER_ENTER_DEBOUNCE frames
+//   edgeMax: hairpin edge entry (above) only while F < edgeMax; 0 = no edge
+//            entry for this corner (was HAIRPIN_EDGE_ENTRY / EDGE_MAX_FRONT_MM)
+//   delay:   frames from the edge to the corner start (EDGE_ENTRY_DELAY);
+//            raise if the inner rear wheel cuts the divider tip
+//   exitIn:  exit needs, besides F > CORNER_EXIT_FRONT_MM for
+//            CORNER_EXIT_DEBOUNCE frames, the inner-side sensor (S0 left,
+//            S6 right) valid and < exitIn in one of those frames: the
+//            divider is beside the car again. 0 = off. Without it, after
+//            CORNER_EXIT_FALLBACK frames above CORNER_EXIT_FRONT_MM the
+//            corner exits anyway.
+// Why exitIn: on the outer line the front opens to 2200-2400 at about
+// 90 deg into a hairpin and the corner exited there (1107 mock b0019,
+// b0020, b0022: S0 2000-2300 at that point); the real exit (inner line,
+// b0021) had S0 700-950. Not for h2: the shortcut opening is on its inner
+// side, and the mock h2 had S6 > 2000 at its exit.
+// History:
+//   edgeMax 2500 (h1, h3): raised (mock h1 edge at F 2690 did not fire;
+//     10/29 venue h1 2074-2189, h3 2358-2380: little margin at h3).
+//   edgeMax 3000: rejected (replay: false edges on the mock straights at
+//     F 2863 / 2884). 2700 until tuned at the venue.
+// ============================================================================
+struct CornerParams {
+    uint16_t gate;     // mm
+    uint16_t edgeMax;  // mm, 0 = off
+    uint8_t delay;     // frames
+    uint16_t exitIn;   // mm, 0 = off
+};
+const CornerParams CORNER_PARAMS[CORNER_SEQUENCE_LEN] = {
+    // gate  edgeMax  delay  exitIn
+    {1200,   2700,    0,     1200},  // 0 h1  (left)
+    {1200,   0,       0,     0},     // 1 h2  (right)
+    {1200,   2700,    0,     1200},  // 2 h3  (left)
+    {1200,   0,       0,     0},     // 3 90L-1
+    {1200,   0,       0,     0},     // 4 90L-2
+};
+const char* const CORNER_NAMES[CORNER_SEQUENCE_LEN] = {"h1", "h2", "h3", "90L-1", "90L-2"};
+const uint8_t CORNER_EXIT_FALLBACK = 30;  // frames (~1.2 s); mock early exits had ~20
 
 // ============================================================================
 // Post-left-corner bias (LOGIC_GATE_BIAS)

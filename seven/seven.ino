@@ -37,6 +37,14 @@ SteeringController steeringController;
 Actuator actuator;
 uint16_t speedUs = SPEED_US;  // cruise pulse; "speed" command
 
+// One corner's values, as in the banner and the "get" reply.
+static String cornerLine(uint8_t i) {
+    const CornerParams& p = gapFinder.params(i);
+    return "c" + String(i) + " " + CORNER_NAMES[i] + " gate=" + String(p.gate) +
+           " edgemax=" + String(p.edgeMax) + " delay=" + String(p.delay) +
+           " exitin=" + String(p.exitIn);
+}
+
 // ============================================================================
 // Serial commands (see Config.h)
 // ============================================================================
@@ -44,7 +52,22 @@ uint16_t speedUs = SPEED_US;  // cruise pulse; "speed" command
 // Into the log (both outputs), and to USB when the log does not go there.
 static void reply(const String& msg) {
     Logger::println(msg);
-    if (!LOG_TO_USB) Serial.println(msg);
+    if (LOG_TO_USB == USB_LOG_OFF) Serial.println(msg);
+}
+
+// "set N KEY V": per-corner value (CORNER_PARAMS).
+static bool setCommand(const String& arg) {
+    int a = arg.indexOf(' ');
+    int b = a < 0 ? -1 : arg.indexOf(' ', a + 1);
+    if (a < 0 || b < 0 || !isDigit(arg[0])) return false;
+    long idx = arg.substring(0, a).toInt();
+    String key = arg.substring(a + 1, b);
+    String val = arg.substring(b + 1);
+    val.trim();
+    if (val.length() == 0 || !isDigit(val[0]) || idx >= CORNER_SEQUENCE_LEN) return false;
+    if (!gapFinder.setParam((uint8_t)idx, key, val.toInt())) return false;
+    reply("# SET " + cornerLine((uint8_t)idx));
+    return true;
 }
 
 static void handleCommand(String cmd) {
@@ -66,35 +89,47 @@ static void handleCommand(String cmd) {
     } else if (name == "speed" && num && v >= CMD_SPEED_MIN_US && v <= CMD_SPEED_MAX_US) {
         speedUs = (uint16_t)v;
         reply("# SET speed=" + String(speedUs));
+    } else if (name == "set" && setCommand(arg)) {
+        // replied in setCommand
     } else if (name == "help" && arg.length() == 0) {
         reply("# HELP start N    next corner = N (0 h1, 1 h2, 2 h3, 3 90L-1, 4 90L-2), back to boot state");
         reply("# HELP reset      back to boot state, same start corner (repeat a test)");
         reply("# HELP speed US   cruise pulse " + String(CMD_SPEED_MIN_US) + "-" +
               String(CMD_SPEED_MAX_US) + " (1500 = stop)");
-        reply("# HELP get        show start, speed, servo");
+        reply("# HELP set N KEY V  corner N: gate MM (enter when F < MM) | edgemax MM (edge entry while F < MM, 0 off)");
+        reply("# HELP              | delay F (frames edge -> turn) | exitin MM (exit needs inner side < MM, 0 off)");
+        reply("# HELP get        show settings only: start, speed, servo, per-corner values");
         reply("# HELP Not saved: a reboot restores Config.h. Changes are logged as # SET.");
     } else if (name == "get" && arg.length() == 0) {
         reply("# GET start=" + String(gapFinder.sequenceStart()) +
               " speed=" + String(speedUs) +
               " servo=" + String(SERVO_MIN) + "/" + String(SERVO_CENTER) + "/" + String(SERVO_MAX));
+        for (uint8_t i = 0; i < CORNER_SEQUENCE_LEN; ++i) reply("# GET " + cornerLine(i));
     } else {
         reply("# ERR '" + cmd + "' (start 0-4 | reset | speed " + String(CMD_SPEED_MIN_US) +
-              "-" + String(CMD_SPEED_MAX_US) + " | get | help)");
+              "-" + String(CMD_SPEED_MAX_US) + " | set N KEY V | get | help)");
     }
 }
 
 // Non-blocking: collect characters, run a command at the end of a line.
-static void pollCommands() {
-    static String buf;
-    while (Serial.available() > 0) {
-        char c = (char)Serial.read();
+// Longer lines are cut at 40 characters (and then rejected as # ERR).
+static void pollStream(Stream& in, String& buf) {
+    while (in.available() > 0) {
+        char c = (char)in.read();
         if (c == '\n' || c == '\r') {
             handleCommand(buf);
             buf = "";
-        } else if (buf.length() < 32) {
+        } else if (buf.length() < 40) {
             buf += c;
         }
     }
+}
+
+// USB serial monitor, and the M5 logger on Serial1 (CMD_FROM_UART).
+static void pollCommands() {
+    static String usbBuf, uartBuf;
+    pollStream(Serial, usbBuf);
+    if (CMD_FROM_UART && LOG_TO_UART) pollStream(Serial1, uartBuf);
 }
 #endif
 
@@ -136,7 +171,8 @@ void setup() {
     Logger::println(TURN_DIR_SOURCE == TURN_DIR_SEQUENCE ? "SEQUENCE" : "BALANCE");
     Logger::print("Corner Sequence Start: ");
     Logger::println(CORNER_SEQUENCE_START);
-    Logger::println("Commands: start N | reset | speed US | get | help (USB serial)");
+    Logger::print("Commands: start N | reset | speed US | set N KEY V | get | help (USB");
+    Logger::println(CMD_FROM_UART && LOG_TO_UART ? ", M5 UART)" : ")");
     Logger::print("Corner One-Sided Target: ");
     Logger::println(CORNER_ONE_SIDED_TARGET ? "ON" : "OFF");
     Logger::print("Corner Hold: exclude S3 ");
@@ -150,7 +186,7 @@ void setup() {
     Logger::println();
     Logger::print("Hairpin Edge Entry: corners");
     for (int i = 0; i < CORNER_SEQUENCE_LEN; ++i) {
-        if (HAIRPIN_EDGE_ENTRY[i]) {
+        if (CORNER_PARAMS[i].edgeMax > 0) {
             Logger::print(" ");
             Logger::print(i + 1);
         }
@@ -159,10 +195,11 @@ void setup() {
     Logger::print(EDGE_NEAR_MM);
     Logger::print(" far ");
     Logger::print(EDGE_FAR_MM);
-    Logger::print(" front< ");
-    Logger::print(EDGE_MAX_FRONT_MM, 0);
-    Logger::print(" delay ");
-    Logger::println(EDGE_ENTRY_DELAY);
+    Logger::println(" (front max and delay per corner)");
+    for (uint8_t i = 0; i < CORNER_SEQUENCE_LEN; ++i) {
+        Logger::print("Corner Param: ");
+        Logger::println(cornerLine(i));
+    }
     Logger::print("Straight Ld Min: ");
     Logger::print(STRAIGHT_LD_MIN_MM, 0);
     Logger::println();
@@ -171,21 +208,23 @@ void setup() {
     Logger::print("Speed: ");
     Logger::print(SPEED_US);
     Logger::println(" us");
-    Logger::print("Corner Gate: enter < ");
-    Logger::print(CORNER_ENTER_FRONT_MM, 0);
-    Logger::print(" x");
+    Logger::print("Corner Gate: enter < gate (per corner) x");
     Logger::print(CORNER_ENTER_DEBOUNCE);
     Logger::print(", exit > ");
     Logger::print(CORNER_EXIT_FRONT_MM, 0);
     Logger::print(" x");
-    Logger::println(CORNER_EXIT_DEBOUNCE);
+    Logger::print(CORNER_EXIT_DEBOUNCE);
+    Logger::print(" (+ exitin, fallback x");
+    Logger::print(CORNER_EXIT_FALLBACK);
+    Logger::println(")");
     Logger::print("Lookahead Offset: ");
     Logger::print(LOOKAHEAD_OFFSET_MM, 0);
     Logger::println();
     Logger::print("Emergency Front: ");
     Logger::println(EMERGENCY_FRONT_THRESHOLD);
     Logger::print("Log Output: USB ");
-    Logger::print(LOG_TO_USB ? "ON" : "OFF");
+    Logger::print(LOG_TO_USB == USB_LOG_FULL ? "FULL"
+                  : LOG_TO_USB == USB_LOG_INFO ? "INFO (no frames)" : "OFF");
     Logger::print(", UART ");
     if (LOG_TO_UART) {
         Logger::print("ON ");
@@ -287,6 +326,7 @@ void loop() {
         const SensorData* sensorData = sensorReader.getAllData();
 
         // Debug: print sensor readings
+        Logger::beginFrame();
         for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
             Logger::printSensorData(SENSOR_CHANNELS[i], sensorData[i].distance,
                                     sensorData[i].valid, sensorData[i].status);
@@ -348,5 +388,6 @@ void loop() {
         Logger::printFrame(frame++);
 
         Logger::println("");
+        Logger::endFrame();
     }
 }

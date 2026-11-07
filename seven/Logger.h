@@ -24,7 +24,7 @@ class Logger {
 #if ENABLE_SERIAL
         if (LOG_TO_UART) Serial1.begin(LOG_UART_BAUD);
         Serial.begin(baud);  // log output (LOG_TO_USB) and serial commands
-        if (LOG_TO_USB) {
+        if (LOG_TO_USB != USB_LOG_OFF) {
             unsigned long start = millis();
             while (!Serial &&
                    (USB_WAIT_MS == 0 || millis() - start < USB_WAIT_MS)) {
@@ -34,11 +34,16 @@ class Logger {
 #endif
     }
 
+    // Frame lines: between beginFrame() and endFrame(). USB_LOG_INFO leaves
+    // them off USB; everything else (banner, command replies) goes there.
+    static void beginFrame() { _inFrame() = true; }
+    static void endFrame() { _inFrame() = false; }
+
     // Generic print, no newline.
     template <typename T>
     static void print(const T& value) {
 #if ENABLE_SERIAL
-        if (LOG_TO_USB) Serial.print(value);
+        if (_usb()) Serial.print(value);
         if (LOG_TO_UART) Serial1.print(value);
 #endif
     }
@@ -46,7 +51,7 @@ class Logger {
     // Float print with explicit precision.
     static void print(float value, int decimals) {
 #if ENABLE_SERIAL
-        if (LOG_TO_USB) Serial.print(value, decimals);
+        if (_usb()) Serial.print(value, decimals);
         if (LOG_TO_UART) Serial1.print(value, decimals);
 #endif
     }
@@ -55,7 +60,7 @@ class Logger {
     template <typename T>
     static void println(const T& value) {
 #if ENABLE_SERIAL
-        if (LOG_TO_USB) Serial.println(value);
+        if (_usb()) Serial.println(value);
         if (LOG_TO_UART) Serial1.println(value);
 #endif
     }
@@ -63,7 +68,7 @@ class Logger {
     // Bare newline.
     static void println() {
 #if ENABLE_SERIAL
-        if (LOG_TO_USB) Serial.println();
+        if (_usb()) Serial.println();
         if (LOG_TO_UART) Serial1.println();
 #endif
     }
@@ -178,6 +183,15 @@ class Logger {
         print(NUM_SENSORS);
         println(" (continuous mode, ~5ms/sensor)");
         println("----------------------------");
+    }
+   private:
+    static bool& _inFrame() {
+        static bool inFrame = false;
+        return inFrame;
+    }
+    static bool _usb() {
+        return LOG_TO_USB == USB_LOG_FULL ||
+               (LOG_TO_USB == USB_LOG_INFO && !_inFrame());
     }
 };
 
