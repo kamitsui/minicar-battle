@@ -35,6 +35,68 @@ SensorReader sensorReader;
 GapFinder gapFinder;
 SteeringController steeringController;
 Actuator actuator;
+uint16_t speedUs = SPEED_US;  // cruise pulse; "speed" command
+
+// ============================================================================
+// Serial commands (see Config.h)
+// ============================================================================
+#if ENABLE_SERIAL
+// Into the log (both outputs), and to USB when the log does not go there.
+static void reply(const String& msg) {
+    Logger::println(msg);
+    if (!LOG_TO_USB) Serial.println(msg);
+}
+
+static void handleCommand(String cmd) {
+    cmd.trim();
+    if (cmd.length() == 0) return;
+    int sp = cmd.indexOf(' ');
+    String name = sp < 0 ? cmd : cmd.substring(0, sp);
+    String arg = sp < 0 ? "" : cmd.substring(sp + 1);
+    arg.trim();
+    long v = arg.toInt();
+    bool num = arg.length() > 0 && (isDigit(arg[0]) || arg[0] == '-');
+
+    if (name == "start" && num && v >= 0 && v < CORNER_SEQUENCE_LEN) {
+        gapFinder.reset((uint8_t)v);
+        reply("# SET start=" + String(v));
+    } else if (name == "reset" && arg.length() == 0) {
+        gapFinder.reset(gapFinder.sequenceStart());
+        reply("# SET reset start=" + String(gapFinder.sequenceStart()));
+    } else if (name == "speed" && num && v >= CMD_SPEED_MIN_US && v <= CMD_SPEED_MAX_US) {
+        speedUs = (uint16_t)v;
+        reply("# SET speed=" + String(speedUs));
+    } else if (name == "help" && arg.length() == 0) {
+        reply("# HELP start N    next corner = N (0 h1, 1 h2, 2 h3, 3 90L-1, 4 90L-2), back to boot state");
+        reply("# HELP reset      back to boot state, same start corner (repeat a test)");
+        reply("# HELP speed US   cruise pulse " + String(CMD_SPEED_MIN_US) + "-" +
+              String(CMD_SPEED_MAX_US) + " (1500 = stop)");
+        reply("# HELP get        show start, speed, servo");
+        reply("# HELP Not saved: a reboot restores Config.h. Changes are logged as # SET.");
+    } else if (name == "get" && arg.length() == 0) {
+        reply("# GET start=" + String(gapFinder.sequenceStart()) +
+              " speed=" + String(speedUs) +
+              " servo=" + String(SERVO_MIN) + "/" + String(SERVO_CENTER) + "/" + String(SERVO_MAX));
+    } else {
+        reply("# ERR '" + cmd + "' (start 0-4 | reset | speed " + String(CMD_SPEED_MIN_US) +
+              "-" + String(CMD_SPEED_MAX_US) + " | get | help)");
+    }
+}
+
+// Non-blocking: collect characters, run a command at the end of a line.
+static void pollCommands() {
+    static String buf;
+    while (Serial.available() > 0) {
+        char c = (char)Serial.read();
+        if (c == '\n' || c == '\r') {
+            handleCommand(buf);
+            buf = "";
+        } else if (buf.length() < 32) {
+            buf += c;
+        }
+    }
+}
+#endif
 
 // ============================================================================
 // setup
@@ -74,6 +136,7 @@ void setup() {
     Logger::println(TURN_DIR_SOURCE == TURN_DIR_SEQUENCE ? "SEQUENCE" : "BALANCE");
     Logger::print("Corner Sequence Start: ");
     Logger::println(CORNER_SEQUENCE_START);
+    Logger::println("Commands: start N | reset | speed US | get | help (USB serial)");
     Logger::print("Corner One-Sided Target: ");
     Logger::println(CORNER_ONE_SIDED_TARGET ? "ON" : "OFF");
     Logger::print("Corner Hold: exclude S3 ");
@@ -105,6 +168,31 @@ void setup() {
     Logger::println();
     Logger::print("Emergency Keep Steer In Corner: ");
     Logger::println(EMERGENCY_KEEP_STEER_IN_CORNER ? "ON" : "OFF");
+    Logger::print("Speed: ");
+    Logger::print(SPEED_US);
+    Logger::println(" us");
+    Logger::print("Corner Gate: enter < ");
+    Logger::print(CORNER_ENTER_FRONT_MM, 0);
+    Logger::print(" x");
+    Logger::print(CORNER_ENTER_DEBOUNCE);
+    Logger::print(", exit > ");
+    Logger::print(CORNER_EXIT_FRONT_MM, 0);
+    Logger::print(" x");
+    Logger::println(CORNER_EXIT_DEBOUNCE);
+    Logger::print("Lookahead Offset: ");
+    Logger::print(LOOKAHEAD_OFFSET_MM, 0);
+    Logger::println();
+    Logger::print("Emergency Front: ");
+    Logger::println(EMERGENCY_FRONT_THRESHOLD);
+    Logger::print("Log Output: USB ");
+    Logger::print(LOG_TO_USB ? "ON" : "OFF");
+    Logger::print(", UART ");
+    if (LOG_TO_UART) {
+        Logger::print("ON ");
+        Logger::println(LOG_UART_BAUD);
+    } else {
+        Logger::println("OFF");
+    }
     Logger::print("Servo MIN/CENTER/MAX: ");
     Logger::print(SERVO_MIN);
     Logger::print("/");
@@ -154,6 +242,7 @@ void setup() {
 // ============================================================================
 void loop() {
     static unsigned long lastMeasurement = 0;
+    static unsigned long frame = 0;
     static unsigned long startTime = 0;
     static bool firstRun = true;
     unsigned long currentTime = millis();
@@ -174,6 +263,11 @@ void loop() {
             delay(1000);
         }
     }
+
+#if ENABLE_SERIAL
+    // Serial commands, between frames (their reply lines never split a frame).
+    pollCommands();
+#endif
 
     // Run measurement and control on a fixed cadence
     if (currentTime - lastMeasurement >= MEASUREMENT_INTERVAL) {
@@ -244,13 +338,14 @@ void loop() {
         } else {
             // Normal cruise.
             actuator.setSteering(steering_angle);
-            actuator.setSpeed(SPEED_US);
+            actuator.setSpeed(speedUs);
         }
 
         // Loop timer end + print
         unsigned long loopEndUs = micros();
         unsigned long loopElapsedUs = loopEndUs - loopStartUs;
         Logger::printLoopTiming(loopElapsedUs, sensorElapsedUs);
+        Logger::printFrame(frame++);
 
         Logger::println("");
     }

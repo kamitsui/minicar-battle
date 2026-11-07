@@ -47,7 +47,8 @@ GapFinder::GapFinder()
       _edgePending(-1),
       _edgeEntry(false),
       _exitArmed(true),
-      _cornerFrames(0) {}
+      _cornerFrames(0),
+      _seqStart(CORNER_SEQUENCE_START) {}
 
 // ============================================================================
 // Private
@@ -170,7 +171,7 @@ bool GapFinder::_hairpinEdge(const SensorData* data) {
         _edgeFarCount = 0;
     }
 
-    uint8_t idx = (CORNER_SEQUENCE_START + _cornerCount) % CORNER_SEQUENCE_LEN;
+    uint8_t idx = (_seqStart + _cornerCount) % CORNER_SEQUENCE_LEN;
     // Fires once, on the EDGE_FAR_FRAMES-th far frame, if the side was near
     // within EDGE_NEAR_WINDOW frames before the far run started.
     return HAIRPIN_EDGE_ENTRY[idx] && _edgeFarCount == EDGE_FAR_FRAMES &&
@@ -179,8 +180,7 @@ bool GapFinder::_hairpinEdge(const SensorData* data) {
 }
 
 int8_t GapFinder::_nextCornerDir() const {
-    return CORNER_SEQUENCE[(CORNER_SEQUENCE_START + _cornerCount) %
-                           CORNER_SEQUENCE_LEN];
+    return CORNER_SEQUENCE[(_seqStart + _cornerCount) % CORNER_SEQUENCE_LEN];
 }
 
 float GapFinder::_effectiveDistance(const SensorData* data, int idx) const {
@@ -301,6 +301,11 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 // ============================================================================
 // Public
 // ============================================================================
+
+void GapFinder::reset(uint8_t seqStart) {
+    *this = GapFinder();
+    _seqStart = seqStart % CORNER_SEQUENCE_LEN;
+}
 
 GapResult GapFinder::find(const SensorData* data) {
     GapResult result = {0.0f, 0, false, 0, 0, false};

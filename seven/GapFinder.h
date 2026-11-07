@@ -20,6 +20,8 @@
  *   CORNER_SEQUENCE under TURN_DIR_SEQUENCE.
  * - _edgeNearAge / _edgeFarCount: inner-side sensor history for the
  *   hairpin edge entry (EXP-006).
+ * - _seqStart: index of the first corner in CORNER_SEQUENCE; starts at
+ *   CORNER_SEQUENCE_START and can be changed with reset() (serial command).
  */
 
 #ifndef GAP_FINDER_H
@@ -63,6 +65,7 @@ class GapFinder {
     bool _edgeEntry;        // current corner entered by the edge
     bool _exitArmed;        // exit counting allowed (see EDGE_EXIT_ARM_FRAMES)
     uint8_t _cornerFrames;  // frames since the corner entry
+    uint8_t _seqStart;      // CORNER_SEQUENCE index of the first corner
 
     // Push the front reading and update the median.
     void _updateFrontFilter(const SensorData* data);
@@ -98,6 +101,12 @@ class GapFinder {
 
     // Main entry point: turn sensor data into a target angle.
     GapResult find(const SensorData* sensorData);
+
+    // Back to the boot state (straight mode, no corners counted), with the
+    // next corner at CORNER_SEQUENCE[seqStart]. Used by the serial commands.
+    void reset(uint8_t seqStart);
+
+    uint8_t sequenceStart() const { return _seqStart; }
 };
 
 #endif  // GAP_FINDER_H

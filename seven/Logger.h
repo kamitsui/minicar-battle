@@ -2,7 +2,8 @@
  * Logger.h
  *
  * Header-only debug logger.
- * Serial output is gated on RUN_MODE (see Config.h).
+ * Serial output is gated on RUN_MODE and goes to USB and/or Serial1
+ * (LOG_TO_USB / LOG_TO_UART, see Config.h).
  */
 
 #ifndef LOGGER_H
@@ -17,13 +18,19 @@
 // ============================================================================
 class Logger {
    public:
-    // Open the serial port.
+    // Open the log outputs (LOG_TO_USB / LOG_TO_UART).
+    // Waits for a PC on USB for at most USB_WAIT_MS (0 = forever).
     static void begin(unsigned long baud = 9600) {
 #if ENABLE_SERIAL
-        Serial.begin(baud);
-        while (!Serial) {
-            delay(10);
-        }  // wait for the serial connection
+        if (LOG_TO_UART) Serial1.begin(LOG_UART_BAUD);
+        Serial.begin(baud);  // log output (LOG_TO_USB) and serial commands
+        if (LOG_TO_USB) {
+            unsigned long start = millis();
+            while (!Serial &&
+                   (USB_WAIT_MS == 0 || millis() - start < USB_WAIT_MS)) {
+                delay(10);
+            }
+        }
 #endif
     }
 
@@ -31,14 +38,16 @@ class Logger {
     template <typename T>
     static void print(const T& value) {
 #if ENABLE_SERIAL
-        Serial.print(value);
+        if (LOG_TO_USB) Serial.print(value);
+        if (LOG_TO_UART) Serial1.print(value);
 #endif
     }
 
     // Float print with explicit precision.
     static void print(float value, int decimals) {
 #if ENABLE_SERIAL
-        Serial.print(value, decimals);
+        if (LOG_TO_USB) Serial.print(value, decimals);
+        if (LOG_TO_UART) Serial1.print(value, decimals);
 #endif
     }
 
@@ -46,14 +55,16 @@ class Logger {
     template <typename T>
     static void println(const T& value) {
 #if ENABLE_SERIAL
-        Serial.println(value);
+        if (LOG_TO_USB) Serial.println(value);
+        if (LOG_TO_UART) Serial1.println(value);
 #endif
     }
 
     // Bare newline.
     static void println() {
 #if ENABLE_SERIAL
-        Serial.println();
+        if (LOG_TO_USB) Serial.println();
+        if (LOG_TO_UART) Serial1.println();
 #endif
     }
 
@@ -142,6 +153,13 @@ class Logger {
         print("us(S:");
         print(sensor_us);
         print("us)");
+    }
+
+    // Frame number since boot (one per control cycle). A jump in N in a
+    // recorded log means lines were lost between the Nano and the logger.
+    static void printFrame(unsigned long frame) {
+        print(" | N:");
+        print(frame);
     }
 
     // Timing-config summary.

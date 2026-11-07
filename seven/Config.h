@@ -26,6 +26,36 @@
 #define ENABLE_PWM (RUN_MODE == MODE_PRODUCTION || RUN_MODE == MODE_DEBUG_RUN)
 
 // ============================================================================
+// Log outputs (only when ENABLE_SERIAL)
+// USB: the PC serial monitor. UART: Serial1 (D1 TX) to the M5StickC Plus2
+// logger for untethered debug runs (5 V -> 3.3 V divider on the line).
+// Turn USB off if the loop time goes over MEASUREMENT_INTERVAL with it on.
+// USB_WAIT_MS: how long setup() waits for a PC on USB; 0 = wait forever
+// (tethered runs, so the banner is not missed). Untethered runs need > 0,
+// or the car never starts.
+// ============================================================================
+const bool LOG_TO_USB = true;
+const bool LOG_TO_UART = true;
+const unsigned long LOG_UART_BAUD = 1000000;  // exact divider on RA4M1 and ESP32
+const unsigned long USB_WAIT_MS = 3000;
+
+// ============================================================================
+// Serial commands (USB serial monitor, one per line; only when ENABLE_SERIAL)
+//   start N   next corner = CORNER_SEQUENCE[N] (0 h1, 1 h2, 2 h3, 3 90L-1,
+//             4 90L-2), and back to the boot state (no corners counted,
+//             straight mode): set up a partial-course test without flashing
+//   reset     back to the boot state, same start corner (repeat a test)
+//   speed US  cruise pulse, CMD_SPEED_MIN_US..CMD_SPEED_MAX_US
+//   get       print the current values
+//   help      print this list
+// Changes are not saved: a reboot goes back to the values in this file.
+// Each change is logged as "# SET ..." (tools/plot_log.py and the M5 screen
+// restart the section count there).
+// ============================================================================
+const uint16_t CMD_SPEED_MIN_US = 1500;  // ESC neutral: no reverse from a typo
+const uint16_t CMD_SPEED_MAX_US = 1750;
+
+// ============================================================================
 // Hardware
 // ============================================================================
 // TCA9548A I2C multiplexer
@@ -276,10 +306,12 @@ const unsigned long AUTO_STOP_SECONDS = 0;
 //     +1 deg, but that run also had the corner steering bug.
 //   1180(R)-1480(C)-1780(L): tried 2026-10-29 (EXP-004); no clear drift
 //     either way, reverted to the nominal range.
+//   1115(R)-1415(C)-1715(L): back in use 2026-11-07 (the center seemed off
+//     with 1500 in a static check).
 // Steering maps onto MIN..MAX, so shift all three together when trimming.
-const uint16_t SERVO_CENTER = 1500;  // center (us)
-const uint16_t SERVO_MIN = 1200;     // min pulse (us) = full right
-const uint16_t SERVO_MAX = 1800;     // max pulse (us) = full left
+const uint16_t SERVO_CENTER = 1415;  // center (us)
+const uint16_t SERVO_MIN = 1115;     // min pulse (us) = full right
+const uint16_t SERVO_MAX = 1715;     // max pulse (us) = full left
 
 // ESC
 const uint16_t ESC_STOP_US = 1500;   // neutral / stop (us)
